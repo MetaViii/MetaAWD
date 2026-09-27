@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""MetaAWD v3.3 打包配置
+"""MetaAWD v3.5 打包配置
 
 构建:
     python -m PyInstaller build.spec --noconfirm --clean
 
 产物:
-    dist/MetaAWD-v3.3.exe   单文件绿色版，双击即用
+    dist/MetaAWD-v3.5.exe   单文件绿色版，双击即用
 
 要点说明
 --------
@@ -13,10 +13,11 @@
    打包后代码位于 PYZ 归档中无法扫描，因此必须显式声明 hiddenimports
    （与 defence/__init__.py 里的冻结清单保持一致）。
 2. defence/phpwaf/*.php 是运行时读取的模板文件，必须作为数据一并打包。
-3. ttkbootstrap 自带主题资源，需要 collect_data_files 收集。
+3. 主题由 ui_theme.py 用标准 ttk 样式在运行时构建，不依赖外部主题数据文件，
+   因此不需要 collect_data_files。
 """
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_submodules
 
 # ---- 数据文件 ----
 datas = [
@@ -27,7 +28,6 @@ datas = [
     ('README.md', '.'),
     ('FIXES.md', '.'),
 ]
-datas += collect_data_files('ttkbootstrap')
 
 # ---- 隐式导入（冻结环境下 os.listdir 无法发现）----
 hiddenimports = [
@@ -80,7 +80,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='MetaAWD-v3.3',
+    name='MetaAWD-v3.5',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

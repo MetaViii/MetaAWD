@@ -67,8 +67,27 @@ chk("攻击工具", "M6 停止用cancel_futures", "cancel_futures=True" in inspe
 gui_src = io.open("gui_main.py", encoding="utf-8").read()
 chk("GUI", "标题栏标注 MetaAWD by metavi",
     'self.title("MetaAWD by metavi")' in gui_src)
-chk("GUI", "品牌标识只在标题栏(未在内容区另加品牌栏)",
-    "brand = ttkb.Frame" not in gui_src and "by metavi" in gui_src)
+theme_src = io.open("ui_theme.py", encoding="utf-8").read()
+chk("GUI", "自建深色主题(clam 基底)",
+    "import ui_theme" in gui_src and "ui.apply_theme" in gui_src
+    and "import sv_ttk" not in gui_src)
+chk("GUI", "DPI 感知在创建 Tk 之前",
+    gui_src.index("ui.enable_dpi_awareness()") < gui_src.index("super().__init__()"))
+chk("GUI", "中文字形字体(雅黑 UI)",
+    "Microsoft YaHei UI" in theme_src and 'font=("Segoe UI"' not in gui_src)
+chk("GUI", "语义按钮已着色",
+    '"Accent.TButton"' in gui_src and '"Danger.TButton"' in gui_src
+    and '"Success.TButton"' in gui_src and '"%s.TButton" % name' in theme_src)
+chk("GUI", "原生控件深色兜底",
+    "darken_native_widgets" in gui_src and "def darken_native_widgets" in theme_src)
+chk("GUI", "已无 ttkbootstrap 依赖",
+    "ttkbootstrap" not in gui_src and "ttkb." not in gui_src)
+chk("GUI", "分组侧边栏导航", "NAV_GROUPS" in gui_src and "_build_shell" in gui_src)
+chk("GUI", "页面堆叠切换(非 Notebook)",
+    "def _add_page" in gui_src and "def show_page" in gui_src and "Notebook" not in gui_src)
+chk("GUI", "顶栏连接指示", "conn_status" in gui_src and "refresh_conn_status" in gui_src)
+chk("GUI", "语义色常量已定义",
+    "COLOR_DANGER" in gui_src and "bootstyle" not in gui_src)
 chk("GUI", "阈值说明按钮", "阈值说明" in gui_src and "show_threshold_help" in gui_src)
 chk("GUI", "阈值动态提示", "update_threshold_hint" in gui_src)
 chk("查杀", "可疑线与阈值联动",

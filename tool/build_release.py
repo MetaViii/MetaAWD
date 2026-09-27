@@ -141,7 +141,7 @@ def main():
     print()
     print(LINE)
     print("  构建完成。可解包抽查产物，确认新规则已打进 PYZ：")
-    print("    pyinstxtractor dist/MetaAWD-v3.3.exe")
+    print("    pyinstxtractor dist/MetaAWD-v3.5.exe")
     print(LINE)
     return 0
 

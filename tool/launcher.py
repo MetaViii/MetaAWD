@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""MetaAWD v3.3 启动器
+"""MetaAWD v3.5 启动器
 
 设计说明
 --------
@@ -25,12 +25,11 @@ CORE_DEPS = [
     ("paramiko", "paramiko>=3.4.0"),
     ("termcolor", "termcolor>=2.3.0"),
 ]
-GUI_DEPS = [
-    ("ttkbootstrap", "ttkbootstrap==1.7.2"),
-]
+# 主题层 ui_theme.py 只用标准库 tkinter/ttk，无第三方 GUI 依赖
+GUI_DEPS = []
 
 MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-VERSION = "3.3"
+VERSION = "3.5"
 
 LINE = "=" * 60
 

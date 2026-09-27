@@ -1,6 +1,7 @@
-import ttkbootstrap as ttkb
-from ttkbootstrap.constants import *
-from tkinter import scrolledtext, messagebox, filedialog
+import tkinter as tk
+from tkinter import ttk, scrolledtext, messagebox, filedialog
+from tkinter.constants import *
+import ui_theme as ui
 import threading
 import re
 import socket
@@ -22,10 +23,25 @@ def strip_ansi(text):
     """移除终端ANSI控制序列"""
     return ansi_escape.sub('', text)
 
-class AWDDfenceGUI(ttkb.Window):
+
+# ==================================================================== 配色
+# sv-ttk 是中性主题，按钮由 PNG 精灵图绘制、无法着色 ——
+# 因此语义色只用在「文本」上（标签 / 日志 / 表格行），不用在按钮上。
+COLOR_DANGER = "#f1706a"
+COLOR_SUCCESS = "#5fc98c"
+COLOR_WARNING = "#e0b341"
+COLOR_INFO = "#57c8ff"          # 信息蓝（主题强调色的浅色变体）
+COLOR_MUTED = "#9b9b9b"
+
+
+class AWDDfenceGUI(tk.Tk):
     def __init__(self):
-        super().__init__(themename="superhero") # 使用 darkly 主题，也可换成 superhero, vapor 等
+        ui.enable_dpi_awareness()         # 必须在创建 Tk 之前，否则窗口被位图拉伸
+        super().__init__()
+        ui.init_scale(self)
+        ui.apply_theme(self)
         self.title("MetaAWD by metavi")
+        ui.apply_dark_title_bar(self)
         self.configure_responsive_window()
         self.shell_input_buffer = ""
         self.shell_cursor_pos = 0
@@ -54,12 +70,12 @@ class AWDDfenceGUI(ttkb.Window):
             "stty -echo -ixon 2>/dev/null"
         ]
         
-        # 整体布局配置
-        self.container = ttkb.Frame(self, padding=10)
-        self.container.pack(expand=True, fill=BOTH)
+        # ---------------- 外壳：顶栏 + 分组侧边栏 + 内容区 ----------------
+        self.pages = {}          # key -> (页面 Frame, 内容容器)
+        self.nav_buttons = {}    # key -> 侧边栏按钮
+        self.current_page = None
 
-        self.notebook = ttkb.Notebook(self.container, bootstyle=PRIMARY)
-        self.notebook.pack(expand=True, fill=BOTH, padx=5, pady=5)
+        self._build_shell()
 
         self.create_ssh_tab()
         self.create_monitor_tab()
@@ -72,80 +88,186 @@ class AWDDfenceGUI(ttkb.Window):
         self.create_packet_tab()
         self.create_system_tab()
         self.create_shell_tab()
-        
-        # 绑定标签页切换事件，实现自动连接终端
-        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+
+        # 各页创建 Text/Frame/Canvas 时未必显式配色，这里统一兜底
+        ui.darken_native_widgets(self)
+        self.show_page("ssh")
 
     def configure_responsive_window(self):
-        screen_width = max(self.winfo_screenwidth(), 900)
-        screen_height = max(self.winfo_screenheight(), 700)
-        width = min(max(980, int(screen_width * 0.72)), screen_width - 80)
-        height = min(max(680, int(screen_height * 0.76)), screen_height - 120)
-        min_width = min(900, max(760, screen_width - 180))
-        min_height = min(620, max(560, screen_height - 220))
+        # DPI 感知开启后 winfo_screen* 返回的是物理像素（本机 150% 时为 2560x1600），
+        # 而这里的尺寸都是按 96 DPI 设计的，必须经 ui.px() 换算后再比较，
+        # 否则 150% 下最小尺寸会缩水到设计值的 2/3。
+        screen_width = max(self.winfo_screenwidth(), ui.px(1100))
+        screen_height = max(self.winfo_screenheight(), ui.px(700))
+        width = min(max(ui.px(1180), int(screen_width * 0.78)), screen_width - ui.px(40))
+        height = min(max(ui.px(700), int(screen_height * 0.78)), screen_height - ui.px(80))
+        min_width = min(ui.px(1060), screen_width - ui.px(80))
+        min_height = min(ui.px(640), screen_height - ui.px(120))
         x = max((screen_width - width) // 2, 0)
         y = max((screen_height - height) // 2, 0)
         self.geometry(f"{width}x{height}+{x}+{y}")
         self.minsize(min_width, min_height)
         self.resizable(True, True)
 
-    def on_tab_changed(self, event):
-        selected_tab = event.widget.select()
-        tab_text = event.widget.tab(selected_tab, "text").strip()
-        
-        # 当切换到“交互终端”且尚未连接时，自动触发连接
-        if tab_text == "交互终端":
-            if state_manager.is_ssh and not self.shell_connecting and (not self.shell_chan or self.shell_chan.closed):
+    # ================================================================ 外壳
+    # 分组导航（WORKSPACE / SECURITY / TOOLS）
+    NAV_GROUPS = [
+        ("WORKSPACE", [
+            ("ssh",      "SSH",     "SSH 配置",  "Secure remote connection"),
+            ("monitor",  "文件监控", "文件监控",  "MD5 baseline change monitoring"),
+            ("scanner",  "木马查杀", "木马查杀",  "WebShell detection & quarantine"),
+            ("tar",      "打包下载", "打包下载",  "Source archive & one-click deploy"),
+            ("attacker", "攻击辅助", "攻击辅助",  "Recon, backdoor check & execution"),
+        ]),
+        ("SECURITY", [
+            ("bugku",  "Bugku",   "Bugku 提交", "Batch flag read & submit"),
+            ("waf",    "WAF",     "WAF 设置",   "Web application firewall"),
+            ("packet", "数据包",   "数据包审查", "Captured attack traffic"),
+            ("system", "系统日志", "系统日志",   "Runtime status overview"),
+        ]),
+        ("TOOLS", [
+            ("shell", "交互终端", "交互终端",   "Interactive SSH shell"),
+        ]),
+    ]
+
+    def _build_shell(self):
+        """顶栏 + 左侧分组导航 + 右侧内容区。
+
+        品牌名只出现在窗口标题栏上（见 __init__ 的 title/apply_dark_title_bar），
+        顶栏留给「当前页面 + 连接状态」这类随运行变化的信息。
+        导航项用自建的 Nav 样式：左对齐扁平按钮，选中态切到 NavActive。
+        """
+        # ---- 顶栏 ----
+        topbar = ttk.Frame(self, padding=(ui.px(18), ui.px(10), ui.px(18), ui.px(8)))
+        topbar.pack(fill=X)
+        self.page_title_label = ttk.Label(topbar, text="", font=ui.FONT_UI_BOLD)
+        self.page_title_label.pack(side=LEFT)
+
+        self.conn_status = ttk.Label(topbar, text="○ 未连接",
+                                     foreground=COLOR_MUTED, font=ui.FONT_UI_SM)
+        self.conn_status.pack(side=RIGHT)
+
+        ttk.Separator(self, orient=HORIZONTAL).pack(fill=X)
+
+        # ---- 主体：左导航 | 分隔线 | 右内容 ----
+        body = ttk.Frame(self)
+        body.pack(expand=True, fill=BOTH)
+
+        sidebar = ttk.Frame(body, padding=(ui.px(10), ui.px(4)), width=ui.px(196))
+        sidebar.pack(side=LEFT, fill=Y)
+        sidebar.pack_propagate(False)
+
+        ttk.Separator(body, orient=VERTICAL).pack(side=LEFT, fill=Y)
+
+        self.pages_area = ttk.Frame(body)
+        self.pages_area.pack(side=LEFT, expand=True, fill=BOTH)
+        self.pages_area.rowconfigure(0, weight=1)
+        self.pages_area.columnconfigure(0, weight=1)
+
+        for group, items in self.NAV_GROUPS:
+            ttk.Label(sidebar, text=group, foreground=COLOR_MUTED,
+                      font=ui.FONT_GROUP).pack(anchor=W, pady=(ui.px(14), ui.px(4)))
+            for key, nav_label, _title, _sub in items:
+                btn = ttk.Button(sidebar, text=nav_label, style="Nav.TButton",
+                                 command=lambda k=key: self.show_page(k))
+                btn.pack(fill=X, pady=ui.px(1))
+                self.nav_buttons[key] = btn
+
+    def _add_page(self, key, padding=16):
+        """建页面：标题 + 副标题 + 内容容器；返回内容容器供各页填控件。
+
+        标题/副标题统一取自 NAV_GROUPS，避免两处维护。
+        """
+        title, subtitle = next(
+            (t, s) for _g, items in self.NAV_GROUPS
+            for k, _n, t, s in items if k == key)
+
+        page = ttk.Frame(self.pages_area)
+        page.grid(row=0, column=0, sticky="nsew")
+
+        pad = ui.px(padding)
+        header = ttk.Frame(page, padding=(pad, pad, pad, ui.px(4)))
+        header.pack(fill=X)
+        ttk.Label(header, text=title, font=ui.FONT_TITLE).pack(anchor=W)
+        ttk.Label(header, text=subtitle,
+                  foreground=COLOR_MUTED).pack(anchor=W, pady=(ui.px(2), 0))
+
+        content = ttk.Frame(page, padding=(pad, ui.px(4), pad, pad))
+        content.pack(expand=True, fill=BOTH)
+
+        self.pages[key] = (page, content)
+        return content
+
+    def show_page(self, key):
+        """切换页面，并执行该页原本绑定在标签切换上的副作用"""
+        for k, (page, _content) in self.pages.items():
+            if k == key:
+                page.tkraise()
+                self.nav_buttons[k].configure(style="NavActive.TButton")
+                self.page_title_label.configure(text=dict(
+                    (kk, t) for _g, items in self.NAV_GROUPS
+                    for kk, _n, t, _s in items).get(key, ""))
+            else:
+                self.nav_buttons[k].configure(style="Nav.TButton")
+        self.current_page = key
+
+        if key == "shell":
+            # 切到终端且尚未连接时自动连
+            if state_manager.is_ssh and not self.shell_connecting and (
+                    not self.shell_chan or self.shell_chan.closed):
                 self.start_shell()
-        if tab_text == "数据包审查":
-            # 进入该页先刷新本地列表；已连接则顺带从远端拉一次，
-            # 否则用户看到的永远是空列表(原实现没有同步入口)
+        elif key == "packet":
+            # 进该页先刷新本地列表；已连接则顺带从远端拉一次
             self.refresh_packet_list()
             if state_manager.is_ssh and not self.sync_in_progress:
                 self.sync_waf_logs(ask_clear=False)
-        if tab_text == "系统日志":
+        elif key == "system":
             self.refresh_system_status()
 
+    def refresh_conn_status(self):
+        """刷新顶栏的连接指示"""
+        if state_manager.is_ssh:
+            self.conn_status.configure(text="● 已连接", foreground=COLOR_SUCCESS)
+        else:
+            self.conn_status.configure(text="○ 未连接", foreground=COLOR_MUTED)
+
     def create_ssh_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" SSH 配置 ")
+        frame = self._add_page("ssh", padding=20)
 
         # 输入区域使用 LabelFrame
-        input_frame = ttkb.LabelFrame(frame, text="连接信息", padding=15)
+        input_frame = ttk.LabelFrame(frame, text="连接信息", padding=15)
         input_frame.pack(fill=X, pady=(0, 15))
 
-        ttkb.Label(input_frame, text="主机 (IP):").grid(row=0, column=0, padx=10, pady=10, sticky=E)
-        self.ssh_host = ttkb.Entry(input_frame, width=30)
+        ttk.Label(input_frame, text="主机 (IP):").grid(row=0, column=0, padx=10, pady=10, sticky=E)
+        self.ssh_host = ttk.Entry(input_frame, width=30)
         self.ssh_host.grid(row=0, column=1, padx=10, pady=10, sticky=W)
 
-        ttkb.Label(input_frame, text="端口 (Port):").grid(row=0, column=2, padx=10, pady=10, sticky=E)
-        self.ssh_port = ttkb.Entry(input_frame, width=10)
+        ttk.Label(input_frame, text="端口 (Port):").grid(row=0, column=2, padx=10, pady=10, sticky=E)
+        self.ssh_port = ttk.Entry(input_frame, width=10)
         self.ssh_port.insert(0, "22")
         self.ssh_port.grid(row=0, column=3, padx=10, pady=10, sticky=W)
 
-        ttkb.Label(input_frame, text="用户名:").grid(row=1, column=0, padx=10, pady=10, sticky=E)
-        self.ssh_user = ttkb.Entry(input_frame, width=30)
+        ttk.Label(input_frame, text="用户名:").grid(row=1, column=0, padx=10, pady=10, sticky=E)
+        self.ssh_user = ttk.Entry(input_frame, width=30)
         self.ssh_user.insert(0, "root")
         self.ssh_user.grid(row=1, column=1, padx=10, pady=10, sticky=W)
 
-        ttkb.Label(input_frame, text="密码:").grid(row=1, column=2, padx=10, pady=10, sticky=E)
-        self.ssh_pass = ttkb.Entry(input_frame, show="*", width=30)
-        # Fix ttkbootstrap bug with show="*" causing empty space rendering issues
-        self.ssh_pass.configure(show="*")
+        ttk.Label(input_frame, text="密码:").grid(row=1, column=2, padx=10, pady=10, sticky=E)
+        self.ssh_pass = ttk.Entry(input_frame, show="*", width=30)
         self.ssh_pass.grid(row=1, column=3, padx=10, pady=10, sticky=W)
 
         # 调整列权重，防止某一列被异常拉伸
         input_frame.columnconfigure(1, weight=1)
         input_frame.columnconfigure(3, weight=1)
 
-        self.btn_ssh_test = ttkb.Button(input_frame, text="测试连接", bootstyle=SUCCESS, command=self.test_ssh)
+        self.btn_ssh_test = ttk.Button(input_frame, text="测试连接", style="Accent.TButton", command=self.test_ssh)
         self.btn_ssh_test.grid(row=2, column=0, columnspan=4, pady=15)
 
         # 日志区域
-        log_frame = ttkb.LabelFrame(frame, text="连接日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="连接日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
         
-        self.ssh_log = scrolledtext.ScrolledText(log_frame, height=15, font=("Consolas", 10))
+        self.ssh_log = scrolledtext.ScrolledText(log_frame, height=15, font=ui.FONT_MONO)
         self.ssh_log.pack(expand=True, fill=BOTH)
 
     def log_ssh(self, msg):
@@ -185,45 +307,46 @@ class AWDDfenceGUI(ttkb.Window):
                 self.log_ssh(f"[x] 连接测试异常: {type(exc).__name__}: {exc}")
             finally:
                 self.btn_ssh_test.after(0, lambda: self.btn_ssh_test.config(state=NORMAL))
+                # ssh_test 会写 state_manager.is_ssh，回到 UI 线程后刷新顶栏指示
+                self.conn_status.after(0, self.refresh_conn_status)
 
         threading.Thread(target=run_test, daemon=True).start()
 
     def create_monitor_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" 文件监控 ")
+        frame = self._add_page("monitor", padding=20)
 
-        control_frame = ttkb.Frame(frame)
+        control_frame = ttk.Frame(frame)
         control_frame.pack(fill=X, pady=(0, 15))
 
-        ttkb.Label(control_frame, text="监控目录:").grid(row=0, column=0, padx=(0, 10), pady=5, sticky=E)
-        self.mon_path = ttkb.Entry(control_frame, width=40)
+        ttk.Label(control_frame, text="监控目录:").grid(row=0, column=0, padx=(0, 10), pady=5, sticky=E)
+        self.mon_path = ttk.Entry(control_frame, width=40)
         self.mon_path.insert(0, "/var/www/html/")
         self.mon_path.grid(row=0, column=1, padx=10, pady=5, sticky=EW)
 
         # 增加复选框用于控制是否自动删除
-        self.is_auto_delete = ttkb.IntVar(value=0)
-        self.chk_auto_delete = ttkb.Checkbutton(
+        self.is_auto_delete = tk.IntVar(value=0)
+        self.chk_auto_delete = ttk.Checkbutton(
             control_frame, 
             text="自动删除被更改/新增的文件", 
             variable=self.is_auto_delete, 
-            bootstyle="danger-round-toggle"
+            style="Switch.TCheckbutton"
         )
         self.chk_auto_delete.grid(row=0, column=2, padx=10, pady=5)
 
-        self.btn_start_mon = ttkb.Button(control_frame, text="开始监控", bootstyle=PRIMARY, command=self.start_monitor)
+        self.btn_start_mon = ttk.Button(control_frame, text="开始监控", style="Accent.TButton", command=self.start_monitor)
         self.btn_start_mon.grid(row=0, column=3, padx=10, pady=5)
 
-        self.btn_pause_mon = ttkb.Button(control_frame, text="暂停", bootstyle=WARNING, command=self.toggle_pause_monitor, state=DISABLED)
+        self.btn_pause_mon = ttk.Button(control_frame, text="暂停", command=self.toggle_pause_monitor, state=DISABLED)
         self.btn_pause_mon.grid(row=0, column=4, padx=10, pady=5)
 
-        self.btn_stop_mon = ttkb.Button(control_frame, text="停止监控", bootstyle=DANGER, command=self.stop_monitor, state=DISABLED)
+        self.btn_stop_mon = ttk.Button(control_frame, text="停止监控", command=self.stop_monitor, state=DISABLED)
         self.btn_stop_mon.grid(row=0, column=5, padx=10, pady=5)
         control_frame.columnconfigure(1, weight=1)
 
-        log_frame = ttkb.LabelFrame(frame, text="监控日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="监控日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
         
-        self.mon_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.mon_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.mon_log.pack(expand=True, fill=BOTH)
 
     def log_mon(self, msg):
@@ -274,11 +397,11 @@ class AWDDfenceGUI(ttkb.Window):
             
         if file_processing.is_paused:
             file_processing.is_paused = False
-            self.btn_pause_mon.config(text="暂停", bootstyle=WARNING)
+            self.btn_pause_mon.config(text="暂停")
             self.log_mon("[*] 监控已继续...")
         else:
             file_processing.is_paused = True
-            self.btn_pause_mon.config(text="继续", bootstyle=SUCCESS)
+            self.btn_pause_mon.config(text="继续")
             self.log_mon("[*] 监控已暂停...")
 
     def stop_monitor(self):
@@ -287,78 +410,72 @@ class AWDDfenceGUI(ttkb.Window):
 
 
     def create_scanner_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" 木马查杀 ")
+        frame = self._add_page("scanner", padding=20)
 
-        control_frame = ttkb.LabelFrame(frame, text="WebShell 查杀", padding=12)
+        control_frame = ttk.LabelFrame(frame, text="WebShell 查杀", padding=12)
         control_frame.pack(fill=X, pady=(0, 12))
 
         # 扫描模式
-        ttkb.Label(control_frame, text="扫描模式:").grid(row=0, column=0, padx=(0, 8), pady=5, sticky=E)
-        self.scan_mode = ttkb.StringVar(value="remote")
-        mode_frame = ttkb.Frame(control_frame)
+        ttk.Label(control_frame, text="扫描模式:").grid(row=0, column=0, padx=(0, 8), pady=5, sticky=E)
+        self.scan_mode = tk.StringVar(value="remote")
+        mode_frame = ttk.Frame(control_frame)
         mode_frame.grid(row=0, column=1, padx=8, pady=5, sticky=W)
-        ttkb.Radiobutton(mode_frame, text="远端(SSH)", variable=self.scan_mode,
-                         value="remote", bootstyle="info").pack(side=LEFT, padx=(0, 12))
-        ttkb.Radiobutton(mode_frame, text="本地", variable=self.scan_mode,
-                         value="local", bootstyle="info").pack(side=LEFT)
+        ttk.Radiobutton(mode_frame, text="远端(SSH)", variable=self.scan_mode,
+                         value="remote").pack(side=LEFT, padx=(0, 12))
+        ttk.Radiobutton(mode_frame, text="本地", variable=self.scan_mode,
+                         value="local").pack(side=LEFT)
 
         # 目标路径
-        ttkb.Label(control_frame, text="目标路径:").grid(row=1, column=0, padx=(0, 8), pady=5, sticky=E)
-        self.scan_path = ttkb.Entry(control_frame, width=46)
+        ttk.Label(control_frame, text="目标路径:").grid(row=1, column=0, padx=(0, 8), pady=5, sticky=E)
+        self.scan_path = ttk.Entry(control_frame, width=46)
         self.scan_path.insert(0, "/var/www/html/")
         self.scan_path.grid(row=1, column=1, padx=8, pady=5, sticky=EW)
 
-        self.btn_scan_pick = ttkb.Button(control_frame, text="选择本地目录",
-                                         bootstyle=SECONDARY, command=self.pick_scan_dir)
+        self.btn_scan_pick = ttk.Button(control_frame, text="选择本地目录", command=self.pick_scan_dir)
         self.btn_scan_pick.grid(row=1, column=2, padx=8, pady=5)
 
         # 阈值
-        ttkb.Label(control_frame, text="判定阈值:").grid(row=2, column=0, padx=(0, 8), pady=5, sticky=E)
-        thr_box = ttkb.Frame(control_frame)
+        ttk.Label(control_frame, text="判定阈值:").grid(row=2, column=0, padx=(0, 8), pady=5, sticky=E)
+        thr_box = ttk.Frame(control_frame)
         thr_box.grid(row=2, column=1, padx=8, pady=5, sticky=W)
-        self.scan_threshold = ttkb.Entry(thr_box, width=8)
+        self.scan_threshold = ttk.Entry(thr_box, width=8)
         self.scan_threshold.insert(0, str(webshell_scanner.DEFAULT_THRESHOLD))
         self.scan_threshold.pack(side=LEFT)
         self.scan_threshold.bind("<KeyRelease>", self.update_threshold_hint)
-        self.btn_threshold_help = ttkb.Button(
-            thr_box, text="阈值说明", bootstyle="secondary-outline", width=9,
+        self.btn_threshold_help = ttk.Button(
+            thr_box, text="阈值说明", width=9,
             command=self.show_threshold_help)
         self.btn_threshold_help.pack(side=LEFT, padx=(6, 0))
 
         # 随输入实时显示两条判定线（可疑线 = 阈值的 40%，与阈值联动）
-        self.threshold_hint = ttkb.Label(control_frame, text="", bootstyle="secondary")
+        self.threshold_hint = ttk.Label(control_frame, text="", foreground=COLOR_MUTED)
         self.threshold_hint.grid(row=2, column=1, padx=(190, 0), pady=5, sticky=W)
 
         # 自动删除
-        self.scan_auto_delete = ttkb.IntVar(value=0)
-        self.chk_scan_delete = ttkb.Checkbutton(
+        self.scan_auto_delete = tk.IntVar(value=0)
+        self.chk_scan_delete = ttk.Checkbutton(
             control_frame,
             text="自动删除恶意文件",
             variable=self.scan_auto_delete,
-            bootstyle="danger-round-toggle"
+            style="Switch.TCheckbutton"
         )
         self.chk_scan_delete.grid(row=2, column=2, padx=8, pady=5)
 
         self.update_threshold_hint()
 
         # 按钮
-        btn_frame = ttkb.Frame(control_frame)
+        btn_frame = ttk.Frame(control_frame)
         btn_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky=W)
-        self.btn_scan_start = ttkb.Button(btn_frame, text="开始查杀",
-                                          bootstyle=DANGER, command=self.start_scan)
+        self.btn_scan_start = ttk.Button(btn_frame, text="开始查杀", style="Accent.TButton", command=self.start_scan)
         self.btn_scan_start.pack(side=LEFT, padx=(0, 10))
-        self.btn_scan_save = ttkb.Button(btn_frame, text="保存报告",
-                                         bootstyle=SUCCESS, command=self.save_scan_report,
+        self.btn_scan_save = ttk.Button(btn_frame, text="保存报告", command=self.save_scan_report,
                                          state=DISABLED)
         self.btn_scan_save.pack(side=LEFT, padx=(0, 10))
-        self.btn_scan_clear = ttkb.Button(btn_frame, text="清空日志",
-                                          bootstyle=SECONDARY, command=self.clear_scan_log)
+        self.btn_scan_clear = ttk.Button(btn_frame, text="清空日志", command=self.clear_scan_log)
         self.btn_scan_clear.pack(side=LEFT)
         # 处置按钮：仅注释「命中那几行」，不动文件其余部分；
         # 且只对判定为「恶意」(level 3) 的文件开放，可疑项一律跳过
-        self.btn_scan_quarantine = ttkb.Button(btn_frame, text="注释危险代码",
-                                               bootstyle=WARNING,
+        self.btn_scan_quarantine = ttk.Button(btn_frame, text="注释危险代码", style="Danger.TButton",
                                                command=self.run_quarantine,
                                                state=DISABLED)
         self.btn_scan_quarantine.pack(side=LEFT, padx=(10, 0))
@@ -366,13 +483,13 @@ class AWDDfenceGUI(ttkb.Window):
         control_frame.columnconfigure(1, weight=1)
 
         # 统计栏
-        self.scan_summary = ttkb.Label(frame, text="就绪", bootstyle="info")
+        self.scan_summary = ttk.Label(frame, text="就绪", foreground=COLOR_INFO)
         self.scan_summary.pack(fill=X, pady=(0, 8))
 
         # 结果区
-        log_frame = ttkb.LabelFrame(frame, text="查杀结果", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="查杀结果", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
-        self.scan_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.scan_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.scan_log.pack(expand=True, fill=BOTH)
 
     def log_scan(self, msg):
@@ -400,21 +517,21 @@ class AWDDfenceGUI(ttkb.Window):
             if t <= 0:
                 raise ValueError
         except (ValueError, AttributeError):
-            self.threshold_hint.config(text="请输入正整数", bootstyle="danger")
+            self.threshold_hint.config(text="请输入正整数", foreground=COLOR_DANGER)
             return
         sus = int(t * webshell_scanner.SUSPECT_RATIO)
         if t < 100:
-            lvl, style = "极敏感·易误报", "danger"
+            lvl, color = "极敏感·易误报", COLOR_DANGER
         elif t < 180:
-            lvl, style = "偏敏感", "warning"
+            lvl, color = "偏敏感", COLOR_WARNING
         elif t <= 260:
-            lvl, style = "平衡·推荐", "success"
+            lvl, color = "平衡·推荐", COLOR_SUCCESS
         elif t <= 400:
-            lvl, style = "偏保守", "warning"
+            lvl, color = "偏保守", COLOR_WARNING
         else:
-            lvl, style = "很保守·易漏报", "danger"
+            lvl, color = "很保守·易漏报", COLOR_DANGER
         self.threshold_hint.config(
-            text="恶意 ≥%d ｜ 可疑 ≥%d ｜ %s" % (t, sus, lvl), bootstyle=style)
+            text="恶意 ≥%d ｜ 可疑 ≥%d ｜ %s" % (t, sus, lvl), foreground=color)
 
     def show_threshold_help(self):
         """弹窗详解检测阈值：代表什么、分数怎么来、高低怎么取舍。"""
@@ -510,16 +627,18 @@ class AWDDfenceGUI(ttkb.Window):
 ================================================================
 """ % {"T": t, "S": sus, "D": dft}
 
-        win = ttkb.Toplevel(self)
+        win = tk.Toplevel(self)
         win.title("检测阈值说明")
-        win.geometry("820x640")
+        win.geometry("%dx%d" % (ui.px(820), ui.px(640)))
         win.transient(self)
-        txt = scrolledtext.ScrolledText(win, font=("Consolas", 10), wrap="word")
-        txt.pack(fill=BOTH, expand=True, padx=12, pady=(12, 8))
+        # Toplevel 是运行时新建的，不在启动时的兜底扫描范围内，单独配色
+        txt = ui.style_text(scrolledtext.ScrolledText(win, wrap="word"))
+        txt.pack(fill=BOTH, expand=True, padx=ui.px(12), pady=(ui.px(12), ui.px(8)))
         txt.insert("1.0", content)
         txt.config(state=DISABLED)
-        ttkb.Button(win, text="关闭", bootstyle="secondary",
-                    command=win.destroy).pack(pady=(0, 12))
+        ttk.Button(win, text="关闭", style="Accent.TButton",
+                   command=win.destroy).pack(pady=(0, ui.px(12)))
+        ui.apply_dark_title_bar(win)
 
     def start_scan(self):
         if self.scan_running:
@@ -554,7 +673,7 @@ class AWDDfenceGUI(ttkb.Window):
         self.btn_scan_save.config(state=DISABLED)
         self.btn_scan_quarantine.config(state=DISABLED)
         self.scan_log.delete(1.0, END)
-        self.scan_summary.config(text="扫描中...", bootstyle="warning")
+        self.scan_summary.config(text="扫描中...", foreground=COLOR_WARNING)
 
         def work():
             try:
@@ -581,7 +700,8 @@ class AWDDfenceGUI(ttkb.Window):
                 summary = f"扫描 {total} 个文件 | 恶意 {mal} | 可疑 {sus}"
                 self.scan_summary.after(0, lambda: self.scan_summary.config(
                     text=summary,
-                    bootstyle="danger" if mal else ("warning" if sus else "success")))
+                    foreground=(COLOR_DANGER if mal
+                                else (COLOR_WARNING if sus else COLOR_SUCCESS))))
                 self.btn_scan_save.after(0, lambda: self.btn_scan_save.config(
                     state=NORMAL if results else DISABLED))
                 # 只有存在「恶意」级结果时才允许处置
@@ -591,7 +711,7 @@ class AWDDfenceGUI(ttkb.Window):
             except Exception as exc:
                 self.log_scan(f"[x] 扫描异常: {exc}")
                 self.scan_summary.after(0, lambda: self.scan_summary.config(
-                    text="扫描失败", bootstyle="danger"))
+                    text="扫描失败", foreground=COLOR_DANGER))
             finally:
                 self.scan_running = False
                 self.btn_scan_start.after(0, lambda: self.btn_scan_start.config(
@@ -635,7 +755,7 @@ class AWDDfenceGUI(ttkb.Window):
 
         self.scan_running = True
         self.btn_scan_quarantine.config(state=DISABLED, text="处理中...")
-        self.scan_summary.config(text="正在生成注释计划...", bootstyle="warning")
+        self.scan_summary.config(text="正在生成注释计划...", foreground=COLOR_WARNING)
 
         def work():
             ssh_client = sftp_client = None
@@ -654,7 +774,7 @@ class AWDDfenceGUI(ttkb.Window):
                 if not plan:
                     self.log_scan("[!] 没有可安全自动注释的行，未做任何修改")
                     self.scan_log.after(0, lambda: self.scan_summary.config(
-                        text="无可安全注释的行", bootstyle="warning"))
+                        text="无可安全注释的行", foreground=COLOR_WARNING))
                     return
 
                 self.log_scan(webshell_scanner.format_quarantine_plan(plan))
@@ -679,7 +799,7 @@ class AWDDfenceGUI(ttkb.Window):
                 if not holder.get("ok"):
                     self.log_scan("[*] 已取消，未修改任何文件")
                     self.scan_log.after(0, lambda: self.scan_summary.config(
-                        text="已取消", bootstyle="secondary"))
+                        text="已取消", foreground=COLOR_MUTED))
                     return
 
                 stats = webshell_scanner.apply_quarantine(
@@ -691,11 +811,11 @@ class AWDDfenceGUI(ttkb.Window):
                 self.log_scan("[*] 建议重新执行一次查杀，确认处置效果")
                 self.scan_log.after(0, lambda: self.scan_summary.config(
                     text=f"已注释 {stats['lines']} 行危险代码（{stats['files']} 个文件）",
-                    bootstyle="success"))
+                    foreground=COLOR_SUCCESS))
             except Exception as exc:
                 self.log_scan(f"[x] 处置失败: {exc}")
                 self.scan_log.after(0, lambda: self.scan_summary.config(
-                    text="处置失败", bootstyle="danger"))
+                    text="处置失败", foreground=COLOR_DANGER))
             finally:
                 for c in (sftp_client, ssh_client):
                     try:
@@ -711,44 +831,43 @@ class AWDDfenceGUI(ttkb.Window):
 
 
     def create_tar_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" 打包下载 ")
+        frame = self._add_page("tar", padding=20)
 
-        control_frame = ttkb.LabelFrame(frame, text="源码备份与恢复", padding=12)
+        control_frame = ttk.LabelFrame(frame, text="源码备份与恢复", padding=12)
         control_frame.pack(fill=X, pady=(0, 15))
 
-        ttkb.Label(control_frame, text="打包目录:").grid(row=0, column=0, padx=6, pady=6, sticky=E)
-        self.tar_path = ttkb.Entry(control_frame, width=32)
+        ttk.Label(control_frame, text="打包目录:").grid(row=0, column=0, padx=6, pady=6, sticky=E)
+        self.tar_path = ttk.Entry(control_frame, width=32)
         self.tar_path.insert(0, "/var/www/html/")
         self.tar_path.grid(row=0, column=1, padx=6, pady=6, sticky=EW)
 
-        ttkb.Label(control_frame, text="下载到:").grid(row=0, column=2, padx=6, pady=6, sticky=E)
-        self.tar_local_dir = ttkb.Entry(control_frame, width=26)
+        ttk.Label(control_frame, text="下载到:").grid(row=0, column=2, padx=6, pady=6, sticky=E)
+        self.tar_local_dir = ttk.Entry(control_frame, width=26)
         self.tar_local_dir.insert(0, file_processing.get_default_local_dir())
         self.tar_local_dir.grid(row=0, column=3, padx=6, pady=6, sticky=EW)
 
-        self.btn_pick_tar_dir = ttkb.Button(control_frame, text="选择目录", bootstyle=SECONDARY, command=self.pick_tar_dir)
+        self.btn_pick_tar_dir = ttk.Button(control_frame, text="选择目录", command=self.pick_tar_dir)
         self.btn_pick_tar_dir.grid(row=0, column=4, padx=6, pady=6)
 
-        self.btn_tar = ttkb.Button(control_frame, text="打包并下载", bootstyle=INFO, command=self.run_tar)
+        self.btn_tar = ttk.Button(control_frame, text="打包并下载", style="Accent.TButton", command=self.run_tar)
         self.btn_tar.grid(row=0, column=5, padx=6, pady=6)
 
-        ttkb.Label(control_frame, text="备份包:").grid(row=1, column=0, padx=6, pady=6, sticky=E)
-        self.tar_backup_file = ttkb.Entry(control_frame, width=42)
+        ttk.Label(control_frame, text="备份包:").grid(row=1, column=0, padx=6, pady=6, sticky=E)
+        self.tar_backup_file = ttk.Entry(control_frame, width=42)
         self.tar_backup_file.grid(row=1, column=1, columnspan=3, padx=6, pady=6, sticky=EW)
 
-        self.btn_pick_backup = ttkb.Button(control_frame, text="选择备份", bootstyle=SECONDARY, command=self.pick_backup_tar)
+        self.btn_pick_backup = ttk.Button(control_frame, text="选择备份", command=self.pick_backup_tar)
         self.btn_pick_backup.grid(row=1, column=4, padx=6, pady=6)
 
-        self.btn_deploy_backup = ttkb.Button(control_frame, text="一键部署", bootstyle=SUCCESS, command=self.run_deploy_backup)
+        self.btn_deploy_backup = ttk.Button(control_frame, text="一键部署", style="Success.TButton", command=self.run_deploy_backup)
         self.btn_deploy_backup.grid(row=1, column=5, padx=6, pady=6)
         control_frame.columnconfigure(1, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
-        log_frame = ttkb.LabelFrame(frame, text="执行日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="执行日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
         
-        self.tar_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.tar_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.tar_log.pack(expand=True, fill=BOTH)
 
     def log_tar(self, msg):
@@ -834,109 +953,108 @@ class AWDDfenceGUI(ttkb.Window):
         threading.Thread(target=execute_deploy, daemon=True).start()
 
     def create_attacker_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=15)
-        self.notebook.add(frame, text=" 攻击辅助 ")
+        frame = self._add_page("attacker", padding=15)
 
-        top = ttkb.Panedwindow(frame, orient=HORIZONTAL)
+        top = ttk.Panedwindow(frame, orient=HORIZONTAL)
         top.pack(fill=X, pady=(0, 10))
 
-        scan_frame = ttkb.LabelFrame(top, text="探活与存活列表", padding=10)
-        shell_frame = ttkb.LabelFrame(top, text="后门检测与命令执行", padding=10)
+        scan_frame = ttk.LabelFrame(top, text="探活与存活列表", padding=10)
+        shell_frame = ttk.LabelFrame(top, text="后门检测与命令执行", padding=10)
         top.add(scan_frame, weight=1)
         top.add(shell_frame, weight=1)
 
-        ttkb.Label(scan_frame, text="URL模板:").grid(row=0, column=0, padx=5, pady=5, sticky=E)
-        self.attack_url_pattern = ttkb.Entry(scan_frame, width=48)
+        ttk.Label(scan_frame, text="URL模板:").grid(row=0, column=0, padx=5, pady=5, sticky=E)
+        self.attack_url_pattern = ttk.Entry(scan_frame, width=48)
         self.attack_url_pattern.insert(0, "http://192-168-1-?.awd.example-ctf.com/")
         self.attack_url_pattern.grid(row=0, column=1, columnspan=3, padx=5, pady=5, sticky=EW)
 
-        ttkb.Label(scan_frame, text="编号:").grid(row=1, column=0, padx=5, pady=5, sticky=E)
-        self.attack_start = ttkb.Entry(scan_frame, width=8)
+        ttk.Label(scan_frame, text="编号:").grid(row=1, column=0, padx=5, pady=5, sticky=E)
+        self.attack_start = ttk.Entry(scan_frame, width=8)
         self.attack_start.insert(0, "0")
         self.attack_start.grid(row=1, column=1, padx=5, pady=5, sticky=W)
-        self.attack_end = ttkb.Entry(scan_frame, width=8)
+        self.attack_end = ttk.Entry(scan_frame, width=8)
         self.attack_end.insert(0, "255")
         self.attack_end.grid(row=1, column=2, padx=5, pady=5, sticky=W)
 
-        ttkb.Label(scan_frame, text="存活文件:").grid(row=2, column=0, padx=5, pady=5, sticky=E)
-        self.attack_output_file = ttkb.Entry(scan_frame, width=35)
+        ttk.Label(scan_frame, text="存活文件:").grid(row=2, column=0, padx=5, pady=5, sticky=E)
+        self.attack_output_file = ttk.Entry(scan_frame, width=35)
         self.attack_output_file.insert(0, "output.txt")
         self.attack_output_file.grid(row=2, column=1, columnspan=2, padx=5, pady=5, sticky=EW)
 
-        self.btn_attack_scan = ttkb.Button(scan_frame, text="快速探活并写入", bootstyle=PRIMARY, command=self.run_attack_scan)
+        self.btn_attack_scan = ttk.Button(scan_frame, text="快速探活并写入", command=self.run_attack_scan)
         self.btn_attack_scan.grid(row=3, column=0, padx=5, pady=8)
-        self.btn_attack_read = ttkb.Button(scan_frame, text="从文件读入", bootstyle=INFO, command=self.run_attack_read)
+        self.btn_attack_read = ttk.Button(scan_frame, text="从文件读入", command=self.run_attack_read)
         self.btn_attack_read.grid(row=3, column=1, padx=5, pady=8)
-        self.btn_attack_pick = ttkb.Button(scan_frame, text="选择文件", bootstyle=SECONDARY, command=self.pick_attack_file)
+        self.btn_attack_pick = ttk.Button(scan_frame, text="选择文件", command=self.pick_attack_file)
         self.btn_attack_pick.grid(row=3, column=2, padx=5, pady=8)
 
-        self.attack_active_summary = ttkb.Label(scan_frame, text="存活目标: 0")
+        self.attack_active_summary = ttk.Label(scan_frame, text="存活目标: 0")
         self.attack_active_summary.grid(row=4, column=0, columnspan=4, padx=5, pady=5, sticky=W)
         scan_frame.columnconfigure(1, weight=1)
         scan_frame.columnconfigure(2, weight=1)
 
-        ttkb.Label(shell_frame, text="后门路径:").grid(row=0, column=0, padx=5, pady=5, sticky=E)
-        self.attack_backdoor_path = ttkb.Entry(shell_frame, width=38)
+        ttk.Label(shell_frame, text="后门路径:").grid(row=0, column=0, padx=5, pady=5, sticky=E)
+        self.attack_backdoor_path = ttk.Entry(shell_frame, width=38)
         self.attack_backdoor_path.insert(0, "public/img/1.php")
         self.attack_backdoor_path.grid(row=0, column=1, columnspan=3, padx=5, pady=5, sticky=EW)
 
-        ttkb.Label(shell_frame, text="key方式:").grid(row=1, column=0, padx=5, pady=5, sticky=E)
-        self.attack_key_method = ttkb.Combobox(shell_frame, values=["0 无", "1 GET", "2 POST"], width=10, state="readonly")
+        ttk.Label(shell_frame, text="key方式:").grid(row=1, column=0, padx=5, pady=5, sticky=E)
+        self.attack_key_method = ttk.Combobox(shell_frame, values=["0 无", "1 GET", "2 POST"], width=10, state="readonly")
         self.attack_key_method.set("0 无")
         self.attack_key_method.grid(row=1, column=1, padx=5, pady=5, sticky=W)
-        self.attack_key = ttkb.Entry(shell_frame, width=14)
+        self.attack_key = ttk.Entry(shell_frame, width=14)
         self.attack_key.grid(row=1, column=2, padx=5, pady=5, sticky=EW)
-        self.attack_key_value = ttkb.Entry(shell_frame, width=18)
+        self.attack_key_value = ttk.Entry(shell_frame, width=18)
         self.attack_key_value.grid(row=1, column=3, padx=5, pady=5, sticky=EW)
 
-        ttkb.Label(shell_frame, text="命令方式:").grid(row=2, column=0, padx=5, pady=5, sticky=E)
-        self.attack_cmd_method = ttkb.Combobox(shell_frame, values=["1 GET", "2 POST"], width=10, state="readonly")
+        ttk.Label(shell_frame, text="命令方式:").grid(row=2, column=0, padx=5, pady=5, sticky=E)
+        self.attack_cmd_method = ttk.Combobox(shell_frame, values=["1 GET", "2 POST"], width=10, state="readonly")
         self.attack_cmd_method.set("2 POST")
         self.attack_cmd_method.grid(row=2, column=1, padx=5, pady=5, sticky=W)
-        ttkb.Label(shell_frame, text="参数名:").grid(row=2, column=2, padx=5, pady=5, sticky=E)
-        self.attack_payload = ttkb.Entry(shell_frame, width=18)
+        ttk.Label(shell_frame, text="参数名:").grid(row=2, column=2, padx=5, pady=5, sticky=E)
+        self.attack_payload = ttk.Entry(shell_frame, width=18)
         self.attack_payload.insert(0, "cmd")
         self.attack_payload.grid(row=2, column=3, padx=5, pady=5, sticky=EW)
 
-        self.btn_attack_check = ttkb.Button(shell_frame, text="检测已知后门", bootstyle=WARNING, command=self.run_attack_check)
+        self.btn_attack_check = ttk.Button(shell_frame, text="检测已知后门", command=self.run_attack_check)
         self.btn_attack_check.grid(row=3, column=0, padx=5, pady=8)
-        self.attack_shell_select = ttkb.Combobox(shell_frame, values=[], width=30, state="readonly")
+        self.attack_shell_select = ttk.Combobox(shell_frame, values=[], width=30, state="readonly")
         self.attack_shell_select.grid(row=3, column=1, columnspan=2, padx=5, pady=8, sticky=EW)
-        self.btn_attack_refresh = ttkb.Button(shell_frame, text="刷新", bootstyle=SECONDARY, command=self.refresh_attack_shells)
+        self.btn_attack_refresh = ttk.Button(shell_frame, text="刷新", command=self.refresh_attack_shells)
         self.btn_attack_refresh.grid(row=3, column=3, padx=5, pady=8)
 
-        ttkb.Label(shell_frame, text="执行内容:").grid(row=4, column=0, padx=5, pady=5, sticky=E)
-        self.attack_command = ttkb.Entry(shell_frame, width=42)
+        ttk.Label(shell_frame, text="执行内容:").grid(row=4, column=0, padx=5, pady=5, sticky=E)
+        self.attack_command = ttk.Entry(shell_frame, width=42)
         self.attack_command.insert(0, "system('id');")
         self.attack_command.grid(row=4, column=1, columnspan=3, padx=5, pady=5, sticky=EW)
-        self.btn_attack_exec = ttkb.Button(shell_frame, text="执行命令", bootstyle=SUCCESS, command=self.run_attack_exec)
+        self.btn_attack_exec = ttk.Button(shell_frame, text="执行命令", command=self.run_attack_exec)
         self.btn_attack_exec.grid(row=5, column=0, padx=5, pady=8)
 
-        ttkb.Label(shell_frame, text="写入目录:").grid(row=5, column=1, padx=5, pady=5, sticky=E)
-        self.attack_remote_dir = ttkb.Entry(shell_frame, width=20)
+        ttk.Label(shell_frame, text="写入目录:").grid(row=5, column=1, padx=5, pady=5, sticky=E)
+        self.attack_remote_dir = ttk.Entry(shell_frame, width=20)
         self.attack_remote_dir.insert(0, "/var/www/html/")
         self.attack_remote_dir.grid(row=5, column=2, padx=5, pady=5, sticky=EW)
-        self.attack_url_dir = ttkb.Entry(shell_frame, width=10)
+        self.attack_url_dir = ttk.Entry(shell_frame, width=10)
         self.attack_url_dir.insert(0, "/")
         self.attack_url_dir.grid(row=5, column=3, padx=5, pady=5, sticky=EW)
 
-        self.attack_with_key = ttkb.IntVar(value=1)
-        self.chk_attack_key_shell = ttkb.Checkbutton(
+        self.attack_with_key = tk.IntVar(value=1)
+        self.chk_attack_key_shell = ttk.Checkbutton(
             shell_frame,
             text="生成带 key 后门",
             variable=self.attack_with_key,
-            bootstyle="round-toggle",
+            style="Switch.TCheckbutton",
         )
         self.chk_attack_key_shell.grid(row=6, column=1, padx=5, pady=8, sticky=W)
-        self.btn_attack_upload = ttkb.Button(shell_frame, text="生成新后门并上传", bootstyle=DANGER, command=self.run_attack_upload)
+        self.btn_attack_upload = ttk.Button(shell_frame, text="生成新后门并上传", command=self.run_attack_upload)
         self.btn_attack_upload.grid(row=6, column=2, columnspan=2, padx=5, pady=8, sticky=EW)
         shell_frame.columnconfigure(1, weight=1)
         shell_frame.columnconfigure(2, weight=1)
         shell_frame.columnconfigure(3, weight=1)
 
-        log_frame = ttkb.LabelFrame(frame, text="攻击辅助日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="攻击辅助日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
-        self.attack_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.attack_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.attack_log.pack(expand=True, fill=BOTH)
 
     def log_attack(self, msg):
@@ -1107,70 +1225,69 @@ class AWDDfenceGUI(ttkb.Window):
         threading.Thread(target=work, daemon=True).start()
 
     def create_bugku_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=15)
-        self.notebook.add(frame, text=" Bugku提交 ")
+        frame = self._add_page("bugku", padding=15)
 
-        form = ttkb.LabelFrame(frame, text="Bugku PVP 批量提交", padding=12)
+        form = ttk.LabelFrame(frame, text="Bugku PVP 批量提交", padding=12)
         form.pack(fill=X, pady=(0, 10))
 
-        ttkb.Label(form, text="域名后缀:").grid(row=0, column=0, padx=6, pady=6, sticky=E)
-        self.bugku_domain = ttkb.Entry(form, width=28)
+        ttk.Label(form, text="域名后缀:").grid(row=0, column=0, padx=6, pady=6, sticky=E)
+        self.bugku_domain = ttk.Entry(form, width=28)
         self.bugku_domain.insert(0, attacker_tools.BUGKU_DEFAULT_DOMAIN)
         self.bugku_domain.grid(row=0, column=1, padx=6, pady=6, sticky=EW)
 
-        ttkb.Label(form, text="后门路径:").grid(row=0, column=2, padx=6, pady=6, sticky=E)
-        self.bugku_path = ttkb.Entry(form, width=34)
+        ttk.Label(form, text="后门路径:").grid(row=0, column=2, padx=6, pady=6, sticky=E)
+        self.bugku_path = ttk.Entry(form, width=34)
         self.bugku_path.insert(0, attacker_tools.BUGKU_DEFAULT_PATH)
         self.bugku_path.grid(row=0, column=3, padx=6, pady=6, sticky=EW)
 
-        ttkb.Label(form, text="读取命令:").grid(row=1, column=0, padx=6, pady=6, sticky=E)
-        self.bugku_cmd = ttkb.Entry(form, width=28)
+        ttk.Label(form, text="读取命令:").grid(row=1, column=0, padx=6, pady=6, sticky=E)
+        self.bugku_cmd = ttk.Entry(form, width=28)
         self.bugku_cmd.insert(0, attacker_tools.BUGKU_DEFAULT_CMD)
         self.bugku_cmd.grid(row=1, column=1, padx=6, pady=6, sticky=EW)
 
-        ttkb.Label(form, text="提交Token:").grid(row=1, column=2, padx=6, pady=6, sticky=E)
-        self.bugku_token = ttkb.Entry(form, width=34)
+        ttk.Label(form, text="提交Token:").grid(row=1, column=2, padx=6, pady=6, sticky=E)
+        self.bugku_token = ttk.Entry(form, width=34)
         self.bugku_token.insert(0, attacker_tools.BUGKU_DEFAULT_TOKEN)
         self.bugku_token.grid(row=1, column=3, padx=6, pady=6, sticky=EW)
 
-        ttkb.Label(form, text="范围:").grid(row=2, column=0, padx=6, pady=6, sticky=E)
-        self.bugku_range = ttkb.Entry(form, width=16)
+        ttk.Label(form, text="范围:").grid(row=2, column=0, padx=6, pady=6, sticky=E)
+        self.bugku_range = ttk.Entry(form, width=16)
         self.bugku_range.insert(0, "1-255")
         self.bugku_range.grid(row=2, column=1, padx=6, pady=6, sticky=W)
 
-        ttkb.Label(form, text="排除:").grid(row=2, column=2, padx=6, pady=6, sticky=E)
-        self.bugku_exclude = ttkb.Entry(form, width=20)
+        ttk.Label(form, text="排除:").grid(row=2, column=2, padx=6, pady=6, sticky=E)
+        self.bugku_exclude = ttk.Entry(form, width=20)
         self.bugku_exclude.grid(row=2, column=3, padx=6, pady=6, sticky=W)
 
-        ttkb.Label(form, text="线程:").grid(row=3, column=0, padx=6, pady=6, sticky=E)
-        self.bugku_threads = ttkb.Entry(form, width=8)
+        ttk.Label(form, text="线程:").grid(row=3, column=0, padx=6, pady=6, sticky=E)
+        self.bugku_threads = ttk.Entry(form, width=8)
         self.bugku_threads.insert(0, "32")
         self.bugku_threads.grid(row=3, column=1, padx=6, pady=6, sticky=W)
 
-        ttkb.Label(form, text="日志文件:").grid(row=3, column=2, padx=6, pady=6, sticky=E)
-        self.bugku_out = ttkb.Entry(form, width=34)
+        ttk.Label(form, text="日志文件:").grid(row=3, column=2, padx=6, pady=6, sticky=E)
+        self.bugku_out = ttk.Entry(form, width=34)
         self.bugku_out.insert(0, "bugku_pvp_results.jsonl")
         self.bugku_out.grid(row=3, column=3, padx=6, pady=6, sticky=EW)
 
-        self.bugku_no_submit = ttkb.IntVar(value=0)
-        self.chk_bugku_no_submit = ttkb.Checkbutton(
+        self.bugku_no_submit = tk.IntVar(value=0)
+        self.chk_bugku_no_submit = ttk.Checkbutton(
             form,
             text="只探测不提交",
             variable=self.bugku_no_submit,
-            bootstyle="round-toggle",
+            style="Switch.TCheckbutton",
         )
         self.chk_bugku_no_submit.grid(row=4, column=1, padx=6, pady=8, sticky=W)
 
-        self.btn_bugku_start = ttkb.Button(form, text="开始批量提交", bootstyle=SUCCESS, command=self.run_bugku_submit)
+        self.btn_bugku_start = ttk.Button(form, text="开始批量提交", style="Accent.TButton", command=self.run_bugku_submit)
         self.btn_bugku_start.grid(row=4, column=2, padx=6, pady=8)
-        self.btn_bugku_stop = ttkb.Button(form, text="停止", bootstyle=DANGER, command=self.stop_bugku_submit, state=DISABLED)
+        self.btn_bugku_stop = ttk.Button(form, text="停止", command=self.stop_bugku_submit, state=DISABLED)
         self.btn_bugku_stop.grid(row=4, column=3, padx=6, pady=8, sticky=W)
         form.columnconfigure(1, weight=1)
         form.columnconfigure(3, weight=1)
 
-        log_frame = ttkb.LabelFrame(frame, text="提交日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="提交日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
-        self.bugku_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.bugku_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.bugku_log.pack(expand=True, fill=BOTH)
 
     def log_bugku(self, msg):
@@ -1213,79 +1330,78 @@ class AWDDfenceGUI(ttkb.Window):
         self.log_bugku("[*] 正在停止，已发出的请求会先返回")
 
     def create_waf_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" WAF设置 ")
+        frame = self._add_page("waf", padding=20)
 
-        control_frame = ttkb.LabelFrame(frame, text="WAF 部署", padding=15)
+        control_frame = ttk.LabelFrame(frame, text="WAF 部署", padding=15)
         control_frame.pack(fill=X, pady=(0, 15))
 
-        ttkb.Label(control_frame, text="业务目录:").grid(row=0, column=0, padx=10, pady=10, sticky=E)
-        self.waf_web_root = ttkb.Entry(control_frame, width=40)
+        ttk.Label(control_frame, text="业务目录:").grid(row=0, column=0, padx=10, pady=10, sticky=E)
+        self.waf_web_root = ttk.Entry(control_frame, width=40)
         self.waf_web_root.insert(0, "/var/www/html")
         self.waf_web_root.grid(row=0, column=1, padx=10, pady=10, sticky=EW)
 
-        ttkb.Label(control_frame, text="隐藏目录:").grid(row=0, column=2, padx=10, pady=10, sticky=E)
-        self.waf_remote_dir = ttkb.Entry(control_frame, width=40)
+        ttk.Label(control_frame, text="隐藏目录:").grid(row=0, column=2, padx=10, pady=10, sticky=E)
+        self.waf_remote_dir = ttk.Entry(control_frame, width=40)
         self.waf_remote_dir.insert(0, state_manager.remote_waf_dir)
         self.waf_remote_dir.grid(row=0, column=3, padx=10, pady=10, sticky=EW)
 
-        ttkb.Label(control_frame, text="日志目录:").grid(row=1, column=0, padx=10, pady=10, sticky=E)
-        self.waf_remote_log_dir = ttkb.Entry(control_frame, width=40)
+        ttk.Label(control_frame, text="日志目录:").grid(row=1, column=0, padx=10, pady=10, sticky=E)
+        self.waf_remote_log_dir = ttk.Entry(control_frame, width=40)
         self.waf_remote_log_dir.insert(0, state_manager.remote_waf_log_dir)
         self.waf_remote_log_dir.grid(row=1, column=1, padx=10, pady=10, sticky=EW)
 
-        ttkb.Label(control_frame, text="拦截方式:").grid(row=1, column=2, padx=10, pady=10, sticky=E)
-        self.waf_mode = ttkb.Combobox(control_frame, values=["1 关键词替换", "2 跳转路由"], width=16, state="readonly")
+        ttk.Label(control_frame, text="拦截方式:").grid(row=1, column=2, padx=10, pady=10, sticky=E)
+        self.waf_mode = ttk.Combobox(control_frame, values=["1 关键词替换", "2 跳转路由"], width=16, state="readonly")
         self.waf_mode.set("2 跳转路由" if state_manager.waf_mode == 2 else "1 关键词替换")
         self.waf_mode.grid(row=1, column=3, padx=10, pady=10, sticky=W)
 
-        ttkb.Label(control_frame, text="严格程度:").grid(row=2, column=0, padx=10, pady=10, sticky=E)
-        self.waf_strict_level = ttkb.Combobox(control_frame, values=["1 简单", "2 常见", "3 全量"], width=16, state="readonly")
+        ttk.Label(control_frame, text="严格程度:").grid(row=2, column=0, padx=10, pady=10, sticky=E)
+        self.waf_strict_level = ttk.Combobox(control_frame, values=["1 简单", "2 常见", "3 全量"], width=16, state="readonly")
         self.waf_strict_level.set(f"{state_manager.waf_strict_level} " + ("简单" if state_manager.waf_strict_level == 1 else "常见" if state_manager.waf_strict_level == 2 else "全量"))
         self.waf_strict_level.grid(row=2, column=1, padx=10, pady=10, sticky=W)
 
-        ttkb.Label(control_frame, text="跳转路由:").grid(row=2, column=2, padx=10, pady=10, sticky=E)
-        self.waf_redirect_path = ttkb.Entry(control_frame, width=40)
+        ttk.Label(control_frame, text="跳转路由:").grid(row=2, column=2, padx=10, pady=10, sticky=E)
+        self.waf_redirect_path = ttk.Entry(control_frame, width=40)
         self.waf_redirect_path.insert(0, state_manager.waf_redirect_path or "/")
         self.waf_redirect_path.grid(row=2, column=3, padx=10, pady=10, sticky=EW)
 
-        self.btn_deploy_waf = ttkb.Button(control_frame, text="一键上 WAF", bootstyle=SUCCESS, command=self.deploy_waf)
+        self.btn_deploy_waf = ttk.Button(control_frame, text="一键上 WAF", style="Accent.TButton", command=self.deploy_waf)
         self.btn_deploy_waf.grid(row=3, column=0, padx=10, pady=10)
 
         # WAF 默认只在命中黑名单时记录请求包；开启此项可记录全部请求，
         # 便于在"数据包审查"页观察对手的完整流量（注意磁盘占用）
-        self.waf_log_all = ttkb.IntVar(value=0)
-        self.chk_waf_log_all = ttkb.Checkbutton(
+        self.waf_log_all = tk.IntVar(value=0)
+        self.chk_waf_log_all = ttk.Checkbutton(
             control_frame,
             text="记录全部请求(数据包审查用)",
             variable=self.waf_log_all,
-            bootstyle="info-round-toggle"
+            style="Switch.TCheckbutton"
         )
         self.chk_waf_log_all.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky=W)
 
-        self.btn_guard_waf = ttkb.Button(control_frame, text="启动自我防护", bootstyle=WARNING, command=self.toggle_waf_guard)
+        self.btn_guard_waf = ttk.Button(control_frame, text="启动自我防护", command=self.toggle_waf_guard)
         self.btn_guard_waf.grid(row=3, column=1, padx=10, pady=10)
 
-        self.btn_undeploy_waf = ttkb.Button(control_frame, text="一键下 WAF", bootstyle=DANGER, command=self.undeploy_waf)
+        self.btn_undeploy_waf = ttk.Button(control_frame, text="一键下 WAF", style="Danger.TButton", command=self.undeploy_waf)
         self.btn_undeploy_waf.grid(row=3, column=2, padx=10, pady=10)
 
-        self.waf_status = ttkb.Label(control_frame, text="状态：未部署")
+        self.waf_status = ttk.Label(control_frame, text="状态：未部署")
         self.waf_status.grid(row=3, column=3, padx=10, pady=10, sticky=W)
 
-        self.waf_lock_hint = ttkb.Label(
+        self.waf_lock_hint = ttk.Label(
             control_frame,
             text="",
-            bootstyle="warning"
+            foreground=COLOR_WARNING
         )
         self.waf_lock_hint.grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 5), sticky=W)
 
         control_frame.columnconfigure(1, weight=1)
         control_frame.columnconfigure(3, weight=1)
 
-        log_frame = ttkb.LabelFrame(frame, text="WAF 日志", padding=10)
+        log_frame = ttk.LabelFrame(frame, text="WAF 日志", padding=10)
         log_frame.pack(expand=True, fill=BOTH)
 
-        self.waf_log = scrolledtext.ScrolledText(log_frame, font=("Consolas", 10))
+        self.waf_log = scrolledtext.ScrolledText(log_frame, font=ui.FONT_MONO)
         self.waf_log.pack(expand=True, fill=BOTH)
         self.update_waf_param_controls()
 
@@ -1425,7 +1541,7 @@ class AWDDfenceGUI(ttkb.Window):
                 if ok and state_manager.waf_guard_enabled:
                     self.waf_guard_stop.set()
                     state_manager.waf_guard_enabled = False
-                    self.btn_guard_waf.after(0, lambda: self.btn_guard_waf.config(text="启动自我防护", bootstyle=WARNING))
+                    self.btn_guard_waf.after(0, lambda: self.btn_guard_waf.config(text="启动自我防护"))
                 if ok:
                     self.update_waf_status(
                         f"状态：已下线，移除 {remove_result['removed']} 个，跳过 {remove_result['skipped']} 个"
@@ -1451,7 +1567,7 @@ class AWDDfenceGUI(ttkb.Window):
         if self.waf_guard_thread and self.waf_guard_thread.is_alive():
             self.waf_guard_stop.set()
             state_manager.waf_guard_enabled = False
-            self.btn_guard_waf.config(text="启动自我防护", bootstyle=WARNING)
+            self.btn_guard_waf.config(text="启动自我防护")
             self.log_waf("• 已停止 WAF 联动守护")
             self.refresh_system_status_async()
             return
@@ -1461,7 +1577,7 @@ class AWDDfenceGUI(ttkb.Window):
     def start_waf_guard(self, auto_started=False):
         self.waf_guard_stop = threading.Event()
         state_manager.waf_guard_enabled = True
-        self.btn_guard_waf.after(0, lambda: self.btn_guard_waf.config(text="停止自我防护", bootstyle=DANGER))
+        self.btn_guard_waf.after(0, lambda: self.btn_guard_waf.config(text="停止自我防护"))
         self.refresh_system_status_async()
         if auto_started:
             self.log_waf("✓ 已自动启动 WAF 联动守护")
@@ -1523,52 +1639,51 @@ class AWDDfenceGUI(ttkb.Window):
         threading.Thread(target=run_sync, daemon=True).start()
 
     def create_packet_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" 数据包审查 ")
+        frame = self._add_page("packet", padding=20)
 
-        toolbar = ttkb.Frame(frame)
+        toolbar = ttk.Frame(frame)
         toolbar.pack(fill=X, pady=(0, 10))
 
         # 关键入口：请求包只存在于远端 WAF 的日志目录，必须同步后才能查看
-        self.btn_sync_packets = ttkb.Button(toolbar, text="从远端同步", bootstyle=SUCCESS,
+        self.btn_sync_packets = ttk.Button(toolbar, text="从远端同步",
                                             command=self.sync_waf_logs)
         self.btn_sync_packets.pack(side=LEFT, padx=(0, 10))
 
-        self.btn_refresh_packets = ttkb.Button(toolbar, text="刷新列表", bootstyle=PRIMARY, command=self.refresh_packet_list)
+        self.btn_refresh_packets = ttk.Button(toolbar, text="刷新列表", command=self.refresh_packet_list)
         self.btn_refresh_packets.pack(side=LEFT, padx=(0, 10))
 
-        self.btn_clear_packets = ttkb.Button(toolbar, text="清空本地", bootstyle=SECONDARY,
+        self.btn_clear_packets = ttk.Button(toolbar, text="清空本地",
                                              command=self.clear_packet_logs)
         self.btn_clear_packets.pack(side=LEFT, padx=(0, 10))
 
-        self.packet_summary = ttkb.Label(toolbar, text="暂无请求包")
+        self.packet_summary = ttk.Label(toolbar, text="暂无请求包")
         self.packet_summary.pack(side=LEFT, padx=10)
 
-        hint = ttkb.Label(
+        hint = ttk.Label(
             frame,
             text=("提示：请求包由远端 PHP WAF 拦截时记录到 "
                   "PHPWAF_LOG_DIR（默认 /tmp/.phpwaf_logs），"
                   "点「从远端同步」拉取。若列表始终为空，请确认："
                   "① WAF 已部署并生效 ② 业务已有流量被拦截 ③ 日志目录可写。"),
-            bootstyle="secondary", wraplength=980, justify=LEFT
+            foreground=COLOR_MUTED, wraplength=980, justify=LEFT
         )
         hint.pack(fill=X, pady=(0, 8))
 
-        content = ttkb.Panedwindow(frame, orient=HORIZONTAL)
+        content = ttk.Panedwindow(frame, orient=HORIZONTAL)
         content.pack(expand=True, fill=BOTH)
 
-        left_frame = ttkb.LabelFrame(content, text="请求包列表", padding=10)
-        right_frame = ttkb.LabelFrame(content, text="原始请求", padding=10)
+        left_frame = ttk.LabelFrame(content, text="请求包列表", padding=10)
+        right_frame = ttk.LabelFrame(content, text="原始请求", padding=10)
         content.add(left_frame, weight=1)
         content.add(right_frame, weight=3)
 
-        self.packet_tree = ttkb.Treeview(left_frame, columns=("name",), show="headings", bootstyle=INFO)
+        self.packet_tree = ttk.Treeview(left_frame, columns=("name",), show="headings")
         self.packet_tree.heading("name", text="文件名")
         self.packet_tree.column("name", anchor=W, width=320)
         self.packet_tree.pack(expand=True, fill=BOTH)
         self.packet_tree.bind("<<TreeviewSelect>>", self.on_packet_select)
 
-        self.packet_preview = scrolledtext.ScrolledText(right_frame, font=("Consolas", 10))
+        self.packet_preview = scrolledtext.ScrolledText(right_frame, font=ui.FONT_MONO)
         self.packet_preview.pack(expand=True, fill=BOTH)
 
     def clear_packet_logs(self):
@@ -1624,19 +1739,18 @@ class AWDDfenceGUI(ttkb.Window):
         self.packet_preview.insert(END, content)
 
     def create_system_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=20)
-        self.notebook.add(frame, text=" 系统日志 ")
+        frame = self._add_page("system", padding=20)
 
-        top_bar = ttkb.Frame(frame)
+        top_bar = ttk.Frame(frame)
         top_bar.pack(fill=X, pady=(0, 10))
 
-        self.btn_refresh_system = ttkb.Button(top_bar, text="刷新状态", bootstyle=PRIMARY, command=self.refresh_system_status)
+        self.btn_refresh_system = ttk.Button(top_bar, text="刷新状态", command=self.refresh_system_status)
         self.btn_refresh_system.pack(side=LEFT, padx=(0, 10))
 
-        self.system_summary = ttkb.Label(top_bar, text="等待状态刷新")
+        self.system_summary = ttk.Label(top_bar, text="等待状态刷新")
         self.system_summary.pack(side=LEFT, padx=10)
 
-        self.system_log = scrolledtext.ScrolledText(frame, font=("Consolas", 10))
+        self.system_log = scrolledtext.ScrolledText(frame, font=ui.FONT_MONO)
         self.system_log.pack(expand=True, fill=BOTH)
         self.refresh_system_status()
 
@@ -1670,22 +1784,16 @@ class AWDDfenceGUI(ttkb.Window):
         self.system_log.insert(END, "\n".join(lines))
 
     def create_shell_tab(self):
-        frame = ttkb.Frame(self.notebook, padding=10)
-        self.notebook.add(frame, text=" 交互终端 ")
+        frame = self._add_page("shell", padding=10)
 
-        # 美化终端背景和字体，移除刺眼的颜色，使用柔和的主题配色
-        self.shell_log = scrolledtext.ScrolledText(
-            frame, 
-            bg="#282C34",          # One Dark 背景色
-            fg="#ABB2BF",          # 柔和的浅灰白色
-            font=("Consolas", 12), # 增大一点字体
-            insertbackground="#528BFF", # 蓝色光标
+        # 终端配色统一走 ui_theme，避免这里再硬编码一套色值
+        self.shell_log = ui.style_text(scrolledtext.ScrolledText(
+            frame,
             insertwidth=2,
             insertontime=600,
             insertofftime=300,
-            padx=10, pady=10,      # 增加内边距
-            wrap=NONE
-        )
+            wrap=NONE,
+        ), size=ui.FONT_MONO_LG[1])
         self.shell_log.pack(expand=True, fill=BOTH)
         self.shell_log.mark_set("input_start", "1.0")
         self.shell_log.mark_gravity("input_start", LEFT)
