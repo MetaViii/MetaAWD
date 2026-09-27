@@ -1,16 +1,15 @@
 """
 WebShell 木马查杀模块
 =====================================================================
-检测模型逆向自 D盾 2.1.8.1 (d_manage.dll)，核心三要素：
+检测引擎核心三要素：
 
   1. 按脚本类型分流 (PHP / ASP / ASPX / JSP)，各自独立规则集
-  2. 特征串带「词边界」匹配 —— 对应 D盾 0x61F7E4：
+  2. 特征串带「词边界」匹配：
      子串命中后检查前一字节字符类别，避免 eval 误命中 reeval
-  3. 0/2/3 三级判定 —— 对应 D盾 0x618C4C：
+  3. 0/2/3 三级判定：
      score>=阈值 -> level 3 (恶意) / >=45% -> level 2 (可疑) / 否则 0 (干净)
 
-与 D盾 的差异：D盾 用等级制直接判定，本模块用加权累加再映射到等级，
-这样便于按环境调阈值；命名规则 (Black_*_Fun / *_Hack) 与其保持一致。
+采用加权累加再映射到等级的方式，便于按环境调阈值。
 
 对外接口:
   scan_local(path, ...)                   本地目录/文件扫描
@@ -36,7 +35,7 @@ except Exception:                                    # termcolor 缺失时降级
 
 
 # ==================================================================== 规则表
-# 每条规则: (特征串, 权重)。权重语义参考 D盾 记录 +8 字段与 _Hack 规则分级。
+# 每条规则: (特征串, 权重)。权重按危险程度分级，危险函数链类规则计高分。
 
 PHP_EXEC = [
     ("system", 60), ("exec", 60), ("shell_exec", 70), ("passthru", 65),
@@ -168,7 +167,7 @@ TYPE_RULES = {
 # .htaccess 的完整文件名(无扩展名，需单独匹配)
 HTACCESS_NAMES = {".htaccess", ".user.ini", "php.ini", ".htpasswd", "web.config"}
 
-# 组合规则：同时命中才计重分 (对应 D盾 的 _Hack 类规则语义)
+# 组合规则：同时命中才计重分（危险函数链，权重高于单条规则）
 COMBO_RULES = [
     (("base64_decode", "eval"), 120, "base64_decode + eval 一句话"),
     (("gzinflate", "eval"), 120, "gzinflate + eval 一句话"),
@@ -211,7 +210,7 @@ DEFAULT_THRESHOLD = 200
 MAX_REMOTE_FILE_SIZE = 2 * 1024 * 1024
 # 文件数不超过该值时全量拉取精确判定；超过才启用 grep 粗筛(保证不因粗筛漏报)
 FULL_SCAN_LIMIT = 800
-# 远端粗筛用的高危关键词(D盾 规则集的高频核心)，用于先把范围缩小
+# 远端粗筛用的高频高危关键词，用于先把范围缩小
 REMOTE_GREP_KEYWORDS = (
     "eval|assert|system|exec|passthru|shell_exec|proc_open|popen|"
     "base64_decode|gzinflate|gzuncompress|str_rot13|create_function|"
@@ -225,7 +224,7 @@ _IDENT = set(b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_$"
 
 # ==================================================================== 核心判定
 def count_wordlike(text_bytes, kw_bytes):
-    """统计 kw 以标识符边界出现的次数 —— 还原 D盾 0x61F7E4 的边界检查"""
+    """统计 kw 以标识符边界出现的次数，避免命中更长标识符的一部分"""
     n = 0
     start = 0
     kw_len = len(kw_bytes)

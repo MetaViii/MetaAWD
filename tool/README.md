@@ -18,7 +18,7 @@
 
 ## v3.0 更新内容
 
-新增 **一键木马查杀** 功能，检测引擎逆向自 D盾 2.1.8.1（`d_manage.dll`）：
+新增 **一键木马查杀** 功能，加权评分检测引擎：
 
 - 支持 PHP / ASP / ASPX / JSP 四类脚本，17 种扩展名
 - 683 条检测规则 + 26 条组合规则（危险函数链）
@@ -154,7 +154,7 @@ python gui_main.py
 
 ### 3. 木马查杀
 
-用于在 AWD 中发现对手上传的 WebShell，检测引擎逆向自 D盾 2.1.8.1。
+用于在 AWD 中发现对手上传的 WebShell。
 
 **扫描模式**
 
@@ -638,7 +638,7 @@ state_manager
 
 ### defence/webshell_scanner.py
 
-木马查杀引擎（v3 新增），检测模型逆向自 D盾 2.1.8.1 的 `d_manage.dll`。
+木马查杀引擎（v3 新增），加权评分检测模型。
 
 **对外接口**
 
@@ -687,9 +687,9 @@ save_report(results, total, out_path=None)     # 保存到 tmp/<host>/
 
 **词边界匹配**
 
-`count_wordlike()` 还原 D盾 `0x61F7E4` 的边界检查：子串命中后检查前一字节
+`count_wordlike()` 做标识符边界检查：子串命中后检查前一字节
 是否属于标识符字符（`[A-Za-z0-9_$]`），是则跳过。因此 `reevaluate`、
-`my_eval_func` 不会触发 `eval` 规则，这是 D盾 误报低的关键。
+`my_eval_func` 不会触发 `eval` 规则，这是误报率低的关键。
 
 **阈值与等级**
 

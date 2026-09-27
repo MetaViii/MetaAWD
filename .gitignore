@@ -19,6 +19,9 @@ output.txt
 *.pem
 secrets.json
 
+# ---- 本地研究目录（引擎分析过程记录，不入库）----
+dshield-reverse/
+
 # ---- D盾 原始二进制与规则库内容（版权，不入库）----
 D_Safe_Manage.exe
 d_safe_*.zip
