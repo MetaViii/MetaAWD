@@ -43,6 +43,8 @@ dist/
 *.spec.bak
 __pycache__/
 *.py[cod]
+# 历史发布产物（已被新版本取代，仅留在本地）
+releases/AWD-Defence-Tool-*.exe
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

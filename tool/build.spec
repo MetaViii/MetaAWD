@@ -1,11 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""AWD Defence Tool v3.1 打包配置
+"""MetaAWD v3.3 打包配置
 
 构建:
     python -m PyInstaller build.spec --noconfirm --clean
 
 产物:
-    dist/AWD-Defence-Tool-v3.1.exe   单文件绿色版，双击即用
+    dist/MetaAWD-v3.3.exe   单文件绿色版，双击即用
 
 要点说明
 --------
@@ -80,7 +80,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='AWD-Defence-Tool-v3.1',
+    name='MetaAWD-v3.3',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

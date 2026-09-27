@@ -1,6 +1,8 @@
-# AWD Defence Tool
+# MetaAWD
 
 面向 AWD / CTF 攻防对抗场景的图形化辅助工具。
+
+**MetaAWD** · by metavi
 
 > 仅供授权的 CTF / AWD 比赛与安全研究使用。
 
@@ -9,8 +11,10 @@
 ## 功能
 
 - **文件监控** —— 基于 MD5 基线对比，检测新增/更改文件，支持自动删除
-- **一键木马查杀** —— 683 条检测规则 + 26 条组合规则
-  （PHP / ASP / ASPX / JSP，含 `.htaccess` 配置后门与图片马）
+- **一键木马查杀** —— 1947 条检测规则 + 66 条组合规则
+  （PHP / ASP / ASPX / JSP，含 `.htaccess` 配置后门、图片马、静态文件藏马）
+- **一键注释危险代码** —— 只注释命中木马的那几行，不动文件其余内容；
+  仅对判定为「恶意」的文件生效（可疑项跳过），改动前自动备份可回滚
 - **源码打包下载 / 一键部署** —— tar 打包拉回本地，支持带自动回滚的恢复
 - **WAF 部署** —— 内置 PHP5/7/8 三套 WAF 模板，一键注入/下线
 - **数据包审查** —— 拉取 WAF 记录的请求包，查看对手原始攻击流量
@@ -25,12 +29,13 @@
 | [`tool/`](tool/) | 工具本体（Python 源码） |
 | [`releases/`](releases/) | 打包好的独立可执行文件 |
 | [`scripts/`](scripts/) | 发布前泄露审计脚本 |
+| [`tool/build_release.py`](tool/build_release.py) | **发布构建脚本** —— 改完源码跑 `python build_release.py` 重新打包 exe |
 
 ## 快速开始
 
 **方式一：独立 exe**（推荐，目标机无需 Python）
 
-下载 [`releases/AWD-Defence-Tool-v3.1.exe`](releases/)，双击运行。
+下载 [`releases/MetaAWD-v3.3.exe`](releases/)，双击运行。
 数据目录 `tmp/` 会生成在 exe 同级目录。
 
 > 未做数字签名，PyInstaller 产物易被杀软误报，建议先将目录加入白名单。
@@ -51,9 +56,11 @@ python launcher.py check    # 仅环境自检
 ```bash
 python -m pip install pyinstaller
 cd tool
-python -m PyInstaller build.spec --noconfirm --clean
-# 产物: dist/AWD-Defence-Tool-v3.1.exe
+python build_release.py            # 校验 -> 打包 -> 验证 -> 部署到 releases/
+python build_release.py --check    # 只校验版本一致性
 ```
+
+产物为 `dist/MetaAWD-v3.3.exe`，并自动复制到 `releases/`。
 
 ## Bugku 提交凭据
 

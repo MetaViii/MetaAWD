@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""AWD Defence Tool v3.1 启动器
+"""MetaAWD v3.3 启动器
 
 设计说明
 --------
@@ -30,7 +30,7 @@ GUI_DEPS = [
 ]
 
 MIRROR = "https://pypi.tuna.tsinghua.edu.cn/simple"
-VERSION = "3.1"
+VERSION = "3.3"
 
 LINE = "=" * 60
 
@@ -143,7 +143,7 @@ def main():
     mode = (sys.argv[1].lower() if len(sys.argv) > 1 else "gui")
 
     info(LINE)
-    info(f"   AWD Defence Tool v{VERSION}")
+    info(f"   MetaAWD v{VERSION}   (by metavi)")
     info(f"   Python {sys.version.split()[0]} @ {sys.executable}")
     info(LINE)
     info("")

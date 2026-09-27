@@ -65,7 +65,14 @@ chk("攻击工具", "M6 停止用cancel_futures", "cancel_futures=True" in inspe
 
 # ============ GUI 入口 ============
 gui_src = io.open("gui_main.py", encoding="utf-8").read()
-chk("GUI", "标题为 v3.1", "AWD Tool v3.1" in gui_src)
+chk("GUI", "标题栏标注 MetaAWD by metavi",
+    'self.title("MetaAWD by metavi")' in gui_src)
+chk("GUI", "品牌标识只在标题栏(未在内容区另加品牌栏)",
+    "brand = ttkb.Frame" not in gui_src and "by metavi" in gui_src)
+chk("GUI", "阈值说明按钮", "阈值说明" in gui_src and "show_threshold_help" in gui_src)
+chk("GUI", "阈值动态提示", "update_threshold_hint" in gui_src)
+chk("查杀", "可疑线与阈值联动",
+    hasattr(ws, "SUSPECT_RATIO") and abs(ws.SUSPECT_RATIO - 0.40) < 1e-9)
 chk("GUI", "数据包页有同步按钮", "btn_sync_packets" in gui_src)
 chk("GUI", "记录全部请求开关", "chk_waf_log_all" in gui_src)
 chk("GUI", "监控线程有finally", "监控线程异常退出" in gui_src)

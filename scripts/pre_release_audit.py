@@ -39,8 +39,9 @@ ALLOW = [
 ]
 
 SKIP_SUFFIX = {".exe", ".png", ".jpg", ".ico", ".zip", ".pyc", ".git"}
-# dshield-reverse 为本地研究目录，不入库，因此不参与发布审计
-SKIP_PARTS = {"__pycache__", ".git", "releases", "dshield-reverse"}
+# build/dist 是 PyInstaller 产物（已被 .gitignore 排除，不入库），
+# 其中的 .toc 含 .NET 程序集版本号（如 6.0.0.0），会被 IP 正则误判
+SKIP_PARTS = {"__pycache__", ".git", "releases", "build", "dist"}
 # 本脚本自身只含正则定义，扫描它会把自己的模式串当成命中
 SELF = Path(__file__).resolve()
 
