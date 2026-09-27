@@ -110,42 +110,56 @@ class AWDDfenceGUI(tk.Tk):
         self.resizable(True, True)
 
     # ================================================================ 外壳
-    # 分组导航（WORKSPACE / SECURITY / TOOLS）
+    # 按 AWD 的攻防语义分组：ATTACK 打点与利用、DEFENCE 检测与加固、OPS 连接与运维
     NAV_GROUPS = [
-        ("WORKSPACE", [
+        ("ATTACK", [
+            ("attacker", "攻击辅助", "攻击辅助", "Recon, backdoor check & execution"),
+            ("bugku",    "Bugku",   "Bugku 提交", "Batch flag read & submit"),
+            ("shell",    "交互终端", "交互终端",   "Interactive SSH shell"),
+        ]),
+        ("DEFENCE", [
+            ("scanner",  "木马查杀", "木马查杀",   "WebShell detection & quarantine"),
+            ("waf",      "WAF",     "WAF 设置",   "Web application firewall"),
+            ("monitor",  "文件监控", "文件监控",   "MD5 baseline change monitoring"),
+            ("system",   "系统日志", "系统日志",   "Runtime status overview"),
+        ]),
+        ("OPS", [
             ("ssh",      "SSH",     "SSH 配置",  "Secure remote connection"),
-            ("monitor",  "文件监控", "文件监控",  "MD5 baseline change monitoring"),
-            ("scanner",  "木马查杀", "木马查杀",  "WebShell detection & quarantine"),
             ("tar",      "打包下载", "打包下载",  "Source archive & one-click deploy"),
-            ("attacker", "攻击辅助", "攻击辅助",  "Recon, backdoor check & execution"),
-        ]),
-        ("SECURITY", [
-            ("bugku",  "Bugku",   "Bugku 提交", "Batch flag read & submit"),
-            ("waf",    "WAF",     "WAF 设置",   "Web application firewall"),
-            ("packet", "数据包",   "数据包审查", "Captured attack traffic"),
-            ("system", "系统日志", "系统日志",   "Runtime status overview"),
-        ]),
-        ("TOOLS", [
-            ("shell", "交互终端", "交互终端",   "Interactive SSH shell"),
+            ("packet",   "数据包",   "数据包审查", "Captured attack traffic"),
         ]),
     ]
 
     def _build_shell(self):
         """顶栏 + 左侧分组导航 + 右侧内容区。
 
-        品牌名只出现在窗口标题栏上（见 __init__ 的 title/apply_dark_title_bar），
-        顶栏留给「当前页面 + 连接状态」这类随运行变化的信息。
+        品牌名只出现在窗口标题栏上，顶栏留给「当前页面 + 连接状态 + 主题切换」。
         导航项用自建的 Nav 样式：左对齐扁平按钮，选中态切到 NavActive。
+
+        顶栏与侧栏底部各铺一层渐变。ttk 没有真正的透明背景，控件底色只能取
+        渐变对应位置的颜色来融合（见 ui_theme.apply_theme 里的 nav_bg/top_bg），
+        所以渐变靠「颜色衔接」而非「透出」来呈现。
         """
-        # ---- 顶栏 ----
-        topbar = ttk.Frame(self, padding=(ui.px(18), ui.px(10), ui.px(18), ui.px(8)))
+        # ---- 顶栏（底铺渐变）----
+        topbar = ttk.Frame(self, padding=(ui.px(18), ui.px(9), ui.px(18), ui.px(9)))
         topbar.pack(fill=X)
-        self.page_title_label = ttk.Label(topbar, text="", font=ui.FONT_UI_BOLD)
+        ui.attach_gradient(topbar, "topbar")
+
+        self.page_title_label = ttk.Label(topbar, text="", style="Top.TLabel",
+                                          font=ui.FONT_UI_BOLD)
         self.page_title_label.pack(side=LEFT)
 
-        self.conn_status = ttk.Label(topbar, text="○ 未连接",
-                                     foreground=COLOR_MUTED, font=ui.FONT_UI_SM)
-        self.conn_status.pack(side=RIGHT)
+        self.theme_box = ttk.Combobox(
+            topbar, state="readonly", width=15, style="Top.TCombobox",
+            values=[lb for _k, lb in ui.theme_names()])
+        self.theme_box.set(ui.theme_label())
+        self.theme_box.pack(side=RIGHT)
+        self.theme_box.bind("<<ComboboxSelected>>", self.on_theme_change)
+        ttk.Label(topbar, text="主题", style="TopMuted.TLabel").pack(
+            side=RIGHT, padx=(0, ui.px(8)))
+
+        self.conn_status = ttk.Label(topbar, text="○ 未连接", style="TopMuted.TLabel")
+        self.conn_status.pack(side=RIGHT, padx=(0, ui.px(18)))
 
         ttk.Separator(self, orient=HORIZONTAL).pack(fill=X)
 
@@ -153,9 +167,10 @@ class AWDDfenceGUI(tk.Tk):
         body = ttk.Frame(self)
         body.pack(expand=True, fill=BOTH)
 
-        sidebar = ttk.Frame(body, padding=(ui.px(10), ui.px(4)), width=ui.px(196))
+        sidebar = ttk.Frame(body, width=ui.px(196))
         sidebar.pack(side=LEFT, fill=Y)
         sidebar.pack_propagate(False)
+        ui.attach_gradient(sidebar, "sidebar")
 
         ttk.Separator(body, orient=VERTICAL).pack(side=LEFT, fill=Y)
 
@@ -165,13 +180,26 @@ class AWDDfenceGUI(tk.Tk):
         self.pages_area.columnconfigure(0, weight=1)
 
         for group, items in self.NAV_GROUPS:
-            ttk.Label(sidebar, text=group, foreground=COLOR_MUTED,
-                      font=ui.FONT_GROUP).pack(anchor=W, pady=(ui.px(14), ui.px(4)))
+            ttk.Label(sidebar, text=group, style="NavGroup.TLabel").pack(
+                anchor=W, pady=(ui.px(16), ui.px(5)), padx=(ui.px(12), 0))
             for key, nav_label, _title, _sub in items:
                 btn = ttk.Button(sidebar, text=nav_label, style="Nav.TButton",
                                  command=lambda k=key: self.show_page(k))
                 btn.pack(fill=X, pady=ui.px(1))
                 self.nav_buttons[key] = btn
+
+        # 导航按钮的底色跟随各自在侧栏里的纵向位置，避免把渐变压成一条色带
+        ui.register_tint(sidebar, self.nav_buttons, "grad_sidebar", "Nav")
+
+    def on_theme_change(self, _event=None):
+        """顶栏下拉切换主题：重建样式 -> 重新深色化 -> 重绘渐变。"""
+        label = self.theme_box.get()
+        key = next((k for k, lb in ui.theme_names() if lb == label), None)
+        if not key or key == ui.current_theme():
+            return
+        ui.apply_theme(self, key)
+        self.refresh_conn_status()
+        self.refresh_page_title()
 
     def _add_page(self, key, padding=16):
         """建页面：标题 + 副标题 + 内容容器；返回内容容器供各页填控件。
@@ -190,7 +218,7 @@ class AWDDfenceGUI(tk.Tk):
         header.pack(fill=X)
         ttk.Label(header, text=title, font=ui.FONT_TITLE).pack(anchor=W)
         ttk.Label(header, text=subtitle,
-                  foreground=COLOR_MUTED).pack(anchor=W, pady=(ui.px(2), 0))
+                  style="Muted.TLabel").pack(anchor=W, pady=(ui.px(2), 0))
 
         content = ttk.Frame(page, padding=(pad, ui.px(4), pad, pad))
         content.pack(expand=True, fill=BOTH)
@@ -200,16 +228,20 @@ class AWDDfenceGUI(tk.Tk):
 
     def show_page(self, key):
         """切换页面，并执行该页原本绑定在标签切换上的副作用"""
+        prev = self.current_page
         for k, (page, _content) in self.pages.items():
             if k == key:
                 page.tkraise()
-                self.nav_buttons[k].configure(style="NavActive.TButton")
-                self.page_title_label.configure(text=dict(
-                    (kk, t) for _g, items in self.NAV_GROUPS
-                    for kk, _n, t, _s in items).get(key, ""))
-            else:
-                self.nav_buttons[k].configure(style="Nav.TButton")
+
+        # 只改「离开的」和「进入的」这两个按钮。早前这里是每页都 configure
+        # 一遍，而 ttk 的 style 变更会触发全窗口重算，切页因此从 27ms 涨到 156ms。
+        if prev and prev != key and prev in self.nav_buttons:
+            self.nav_buttons[prev].configure(style=ui.tint_style_of(self.nav_buttons[prev]))
+        if key in self.nav_buttons:
+            self.nav_buttons[key].configure(style="NavActive.TButton")
+
         self.current_page = key
+        self.refresh_page_title()
 
         if key == "shell":
             # 切到终端且尚未连接时自动连
@@ -224,12 +256,21 @@ class AWDDfenceGUI(tk.Tk):
         elif key == "system":
             self.refresh_system_status()
 
+    def refresh_page_title(self):
+        """顶栏左侧显示当前页面名（页面标题统一取自 NAV_GROUPS）"""
+        title = dict((k, t) for _g, items in self.NAV_GROUPS
+                     for k, _n, t, _s in items).get(self.current_page, "")
+        try:
+            self.page_title_label.configure(text=title)
+        except Exception:
+            pass
+
     def refresh_conn_status(self):
-        """刷新顶栏的连接指示"""
+        """刷新顶栏的连接指示（走样式，切换主题时才会跟着变）"""
         if state_manager.is_ssh:
-            self.conn_status.configure(text="● 已连接", foreground=COLOR_SUCCESS)
+            self.conn_status.configure(text="● 已连接", style="TopSuccess.TLabel")
         else:
-            self.conn_status.configure(text="○ 未连接", foreground=COLOR_MUTED)
+            self.conn_status.configure(text="○ 未连接", style="TopMuted.TLabel")
 
     def create_ssh_tab(self):
         frame = self._add_page("ssh", padding=20)

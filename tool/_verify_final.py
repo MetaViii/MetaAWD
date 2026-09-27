@@ -77,7 +77,18 @@ chk("GUI", "中文字形字体(雅黑 UI)",
     "Microsoft YaHei UI" in theme_src and 'font=("Segoe UI"' not in gui_src)
 chk("GUI", "语义按钮已着色",
     '"Accent.TButton"' in gui_src and '"Danger.TButton"' in gui_src
-    and '"Success.TButton"' in gui_src and '"%s.TButton" % name' in theme_src)
+    and '"Success.TButton"' in gui_src
+    and '"Danger", P["danger"]' in theme_src and '"%s.TButton" % sname' in theme_src)
+chk("GUI", "多主题可切换",
+    "THEMES" in theme_src and "def apply_theme" in theme_src
+    and "on_theme_change" in gui_src and "theme_box" in gui_src)
+chk("GUI", "渐变用 Canvas 逐行矩形",
+    "class GradientCanvas" in theme_src and "create_rectangle" in theme_src
+    and "PhotoImage(" not in theme_src)
+chk("GUI", "渐变重绘有防抖",
+    "after(120" in theme_src or "after(120," in theme_src)
+chk("GUI", "侧栏按攻防语义分组",
+    '"ATTACK"' in gui_src and '"DEFENCE"' in gui_src and '"OPS"' in gui_src)
 chk("GUI", "原生控件深色兜底",
     "darken_native_widgets" in gui_src and "def darken_native_widgets" in theme_src)
 chk("GUI", "已无 ttkbootstrap 依赖",
