@@ -1,0 +1,59 @@
+# ---- 运行产物（绝不入库）----
+tmp/
+**/tmp/
+*.http
+*.log
+webshell_report_*.txt
+waf_logs/
+
+# ---- 比赛数据（含 flag / 靶机地址 / 攻击流量）----
+*results.jsonl
+*flag_results.jsonl
+output.txt
+*.tar.gz
+*.pcap
+
+# ---- 凭据 ----
+.env
+*.key
+*.pem
+secrets.json
+
+# ---- D盾 原始二进制与规则库内容（版权，不入库）----
+D_Safe_Manage.exe
+d_safe_*.zip
+*.dll
+*.db
+*.dat
+ws_lib*.bin
+_D_WS_LIB*.bin
+RES_RULE_DATA*.bin
+D_WS_INFO_DB*.bin
+D_LOG*.bin
+*.zlib*.bin
+*.strings.tsv
+xref_db.pkl
+
+# ---- 构建产物 ----
+build/
+dist/
+*.spec.bak
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---- 编辑器 / 系统 ----
+.vscode/
+.idea/
+*.swp
+*~
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- 本地覆盖 ----
+local_settings.py
+*.local

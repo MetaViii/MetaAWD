@@ -1,0 +1,28 @@
+# 默认按文本处理并统一换行，避免跨平台 diff 噪声
+* text=auto
+
+# 源码：仓库内统一 LF，检出时按平台
+*.py    text eol=lf
+*.md    text eol=lf
+*.txt   text eol=lf
+*.spec  text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+
+# Windows 批处理必须 CRLF，且保持纯 ASCII（cmd 按启动时代码页解码）
+*.bat   text eol=crlf
+
+# PHP 模板保持 LF
+*.php   text eol=lf
+
+# 二进制：不做任何转换
+*.exe   binary
+*.dll   binary
+*.png   binary
+*.jpg   binary
+*.ico   binary
+*.zip   binary
+*.gz    binary
+
+# 语言统计时排除
+releases/* linguist-vendored
