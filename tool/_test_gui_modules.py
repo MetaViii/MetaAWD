@@ -39,7 +39,7 @@ print(f"窗口 {app.winfo_width()}x{app.winfo_height()}  主题 {__import__('tki
 print("【外壳】")
 check("10 个页面已注册", len(app.pages) == 10, f"实际 {len(app.pages)}")
 check("10 个导航按钮", len(app.nav_buttons) == 10, f"实际 {len(app.nav_buttons)}")
-check("导航分组为 3 组", len(app.NAV_GROUPS) == 3)
+check("导航项齐备", len(app.NAV_ITEMS) == 10)
 check("默认停在 SSH 页", app.current_page == "ssh")
 for k in app.pages:
     app.show_page(k)

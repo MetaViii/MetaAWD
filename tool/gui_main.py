@@ -25,13 +25,8 @@ def strip_ansi(text):
 
 
 # ==================================================================== 配色
-# sv-ttk 是中性主题，按钮由 PNG 精灵图绘制、无法着色 ——
-# 因此语义色只用在「文本」上（标签 / 日志 / 表格行），不用在按钮上。
-COLOR_DANGER = "#f1706a"
-COLOR_SUCCESS = "#5fc98c"
-COLOR_WARNING = "#e0b341"
-COLOR_INFO = "#57c8ff"          # 信息蓝（主题强调色的浅色变体）
-COLOR_MUTED = "#9b9b9b"
+# 全部语义色改由 ui_theme 的 ttk 样式提供（Danger/Success/Warning/Info/Muted.TLabel），
+# 这样切换主题时会自动跟随。此前这里硬编码过一套色值，浅色主题下对比度不足。
 
 
 class AWDDfenceGUI(tk.Tk):
@@ -110,56 +105,43 @@ class AWDDfenceGUI(tk.Tk):
         self.resizable(True, True)
 
     # ================================================================ 外壳
-    # 按 AWD 的攻防语义分组：ATTACK 打点与利用、DEFENCE 检测与加固、OPS 连接与运维
-    NAV_GROUPS = [
-        ("ATTACK", [
-            ("attacker", "攻击辅助", "攻击辅助", "Recon, backdoor check & execution"),
-            ("bugku",    "Bugku",   "Bugku 提交", "Batch flag read & submit"),
-            ("shell",    "交互终端", "交互终端",   "Interactive SSH shell"),
-        ]),
-        ("DEFENCE", [
-            ("scanner",  "木马查杀", "木马查杀",   "WebShell detection & quarantine"),
-            ("waf",      "WAF",     "WAF 设置",   "Web application firewall"),
-            ("monitor",  "文件监控", "文件监控",   "MD5 baseline change monitoring"),
-            ("system",   "系统日志", "系统日志",   "Runtime status overview"),
-        ]),
-        ("OPS", [
-            ("ssh",      "SSH",     "SSH 配置",  "Secure remote connection"),
-            ("tar",      "打包下载", "打包下载",  "Source archive & one-click deploy"),
-            ("packet",   "数据包",   "数据包审查", "Captured attack traffic"),
-        ]),
+    # 平铺导航，不再分组。页面数量不多，分组标题只会增加视觉噪音。
+    # 顺序按实际操作流：先连上 -> 看住防线 -> 处置 -> 打包 -> 攻击面
+    NAV_ITEMS = [
+        ("ssh",      "SSH",     "Secure remote connection"),
+        ("monitor",  "文件监控", "MD5 baseline change monitoring"),
+        ("scanner",  "木马查杀", "WebShell detection & quarantine"),
+        ("waf",      "WAF",     "Web application firewall"),
+        ("system",   "系统日志", "Runtime status overview"),
+        ("packet",   "数据包",   "Captured attack traffic"),
+        ("tar",      "打包下载", "Source archive & one-click deploy"),
+        ("attacker", "攻击辅助", "Recon, backdoor check & execution"),
+        ("bugku",    "Bugku",   "Batch flag read & submit"),
+        ("shell",    "交互终端", "Interactive SSH shell"),
     ]
 
     def _build_shell(self):
-        """顶栏 + 左侧分组导航 + 右侧内容区。
+        """顶栏 + 左侧平铺导航 + 右侧内容区。
 
         品牌名只出现在窗口标题栏上，顶栏留给「当前页面 + 连接状态 + 主题切换」。
-        导航项用自建的 Nav 样式：左对齐扁平按钮，选中态切到 NavActive。
-
-        顶栏与侧栏底部各铺一层渐变。ttk 没有真正的透明背景，控件底色只能取
-        渐变对应位置的颜色来融合（见 ui_theme.apply_theme 里的 nav_bg/top_bg），
-        所以渐变靠「颜色衔接」而非「透出」来呈现。
+        导航项是纯文字按钮，选中项以强调色前景 + 底色块区分，不用分组标题。
         """
-        # ---- 顶栏（底铺渐变）----
-        topbar = ttk.Frame(self, padding=(ui.px(18), ui.px(9), ui.px(18), ui.px(9)))
+        # ---- 顶栏 ----
+        topbar = ttk.Frame(self, padding=(ui.px(20), ui.px(12), ui.px(20), ui.px(12)))
         topbar.pack(fill=X)
-        ui.attach_gradient(topbar, "topbar")
-
-        self.page_title_label = ttk.Label(topbar, text="", style="Top.TLabel",
-                                          font=ui.FONT_UI_BOLD)
+        self.page_title_label = ttk.Label(topbar, text="", font=ui.FONT_UI_BOLD)
         self.page_title_label.pack(side=LEFT)
 
         self.theme_box = ttk.Combobox(
-            topbar, state="readonly", width=15, style="Top.TCombobox",
+            topbar, state="readonly", width=10,
             values=[lb for _k, lb in ui.theme_names()])
         self.theme_box.set(ui.theme_label())
         self.theme_box.pack(side=RIGHT)
         self.theme_box.bind("<<ComboboxSelected>>", self.on_theme_change)
-        ttk.Label(topbar, text="主题", style="TopMuted.TLabel").pack(
-            side=RIGHT, padx=(0, ui.px(8)))
 
-        self.conn_status = ttk.Label(topbar, text="○ 未连接", style="TopMuted.TLabel")
-        self.conn_status.pack(side=RIGHT, padx=(0, ui.px(18)))
+        self.conn_status = ttk.Label(topbar, text="○ 未连接",
+                                     style="Muted.TLabel", font=ui.FONT_UI_SM)
+        self.conn_status.pack(side=RIGHT, padx=(0, ui.px(16)))
 
         ttk.Separator(self, orient=HORIZONTAL).pack(fill=X)
 
@@ -167,10 +149,9 @@ class AWDDfenceGUI(tk.Tk):
         body = ttk.Frame(self)
         body.pack(expand=True, fill=BOTH)
 
-        sidebar = ttk.Frame(body, width=ui.px(196))
+        sidebar = ttk.Frame(body, style="Sidebar.TFrame", width=ui.px(168))
         sidebar.pack(side=LEFT, fill=Y)
         sidebar.pack_propagate(False)
-        ui.attach_gradient(sidebar, "sidebar")
 
         ttk.Separator(body, orient=VERTICAL).pack(side=LEFT, fill=Y)
 
@@ -179,17 +160,12 @@ class AWDDfenceGUI(tk.Tk):
         self.pages_area.rowconfigure(0, weight=1)
         self.pages_area.columnconfigure(0, weight=1)
 
-        for group, items in self.NAV_GROUPS:
-            ttk.Label(sidebar, text=group, style="NavGroup.TLabel").pack(
-                anchor=W, pady=(ui.px(16), ui.px(5)), padx=(ui.px(12), 0))
-            for key, nav_label, _title, _sub in items:
-                btn = ttk.Button(sidebar, text=nav_label, style="Nav.TButton",
-                                 command=lambda k=key: self.show_page(k))
-                btn.pack(fill=X, pady=ui.px(1))
-                self.nav_buttons[key] = btn
-
-        # 导航按钮的底色跟随各自在侧栏里的纵向位置，避免把渐变压成一条色带
-        ui.register_tint(sidebar, self.nav_buttons, "grad_sidebar", "Nav")
+        ttk.Frame(sidebar, height=ui.px(8)).pack(fill=X)
+        for key, nav_label, _sub in self.NAV_ITEMS:
+            btn = ttk.Button(sidebar, text=nav_label, style="Nav.TButton",
+                             command=lambda k=key: self.show_page(k))
+            btn.pack(fill=X, padx=ui.px(8), pady=ui.px(1))
+            self.nav_buttons[key] = btn
 
     def on_theme_change(self, _event=None):
         """顶栏下拉切换主题：重建样式 -> 重新深色化 -> 重绘渐变。"""
@@ -204,11 +180,10 @@ class AWDDfenceGUI(tk.Tk):
     def _add_page(self, key, padding=16):
         """建页面：标题 + 副标题 + 内容容器；返回内容容器供各页填控件。
 
-        标题/副标题统一取自 NAV_GROUPS，避免两处维护。
+        标题/副标题统一取自 NAV_ITEMS，避免两处维护。
         """
         title, subtitle = next(
-            (t, s) for _g, items in self.NAV_GROUPS
-            for k, _n, t, s in items if k == key)
+            (n, s) for k, n, s in self.NAV_ITEMS if k == key)
 
         page = ttk.Frame(self.pages_area)
         page.grid(row=0, column=0, sticky="nsew")
@@ -233,10 +208,10 @@ class AWDDfenceGUI(tk.Tk):
             if k == key:
                 page.tkraise()
 
-        # 只改「离开的」和「进入的」这两个按钮。早前这里是每页都 configure
-        # 一遍，而 ttk 的 style 变更会触发全窗口重算，切页因此从 27ms 涨到 156ms。
+        # 只改「离开的」和「进入的」这两个按钮。ttk 的 style 变更会触发全窗口
+        # 重算，早前每页都 configure 一遍时切页会从 27ms 涨到 156ms。
         if prev and prev != key and prev in self.nav_buttons:
-            self.nav_buttons[prev].configure(style=ui.tint_style_of(self.nav_buttons[prev]))
+            self.nav_buttons[prev].configure(style="Nav.TButton")
         if key in self.nav_buttons:
             self.nav_buttons[key].configure(style="NavActive.TButton")
 
@@ -257,20 +232,20 @@ class AWDDfenceGUI(tk.Tk):
             self.refresh_system_status()
 
     def refresh_page_title(self):
-        """顶栏左侧显示当前页面名（页面标题统一取自 NAV_GROUPS）"""
-        title = dict((k, t) for _g, items in self.NAV_GROUPS
-                     for k, _n, t, _s in items).get(self.current_page, "")
+        """顶栏左侧显示当前页面名（页面标题统一取自 NAV_ITEMS）"""
+        title = dict((k, n) for k, n, _s in self.NAV_ITEMS).get(self.current_page, "")
         try:
             self.page_title_label.configure(text=title)
         except Exception:
             pass
 
     def refresh_conn_status(self):
-        """刷新顶栏的连接指示（走样式，切换主题时才会跟着变）"""
+        """刷新顶栏的连接指示（用当前主题色，切换主题后会跟着变）"""
+        P = ui.PALETTE
         if state_manager.is_ssh:
-            self.conn_status.configure(text="● 已连接", style="TopSuccess.TLabel")
+            self.conn_status.configure(text="● 已连接", foreground=P["success_hi"])
         else:
-            self.conn_status.configure(text="○ 未连接", style="TopMuted.TLabel")
+            self.conn_status.configure(text="○ 未连接", foreground=P["fg_dim"])
 
     def create_ssh_tab(self):
         frame = self._add_page("ssh", padding=20)
@@ -489,7 +464,7 @@ class AWDDfenceGUI(tk.Tk):
         self.btn_threshold_help.pack(side=LEFT, padx=(6, 0))
 
         # 随输入实时显示两条判定线（可疑线 = 阈值的 40%，与阈值联动）
-        self.threshold_hint = ttk.Label(control_frame, text="", foreground=COLOR_MUTED)
+        self.threshold_hint = ttk.Label(control_frame, text="", style="CardMuted.TLabel")
         self.threshold_hint.grid(row=2, column=1, padx=(190, 0), pady=5, sticky=W)
 
         # 自动删除
@@ -524,7 +499,7 @@ class AWDDfenceGUI(tk.Tk):
         control_frame.columnconfigure(1, weight=1)
 
         # 统计栏
-        self.scan_summary = ttk.Label(frame, text="就绪", foreground=COLOR_INFO)
+        self.scan_summary = ttk.Label(frame, text="就绪", style="Info.TLabel")
         self.scan_summary.pack(fill=X, pady=(0, 8))
 
         # 结果区
@@ -558,21 +533,21 @@ class AWDDfenceGUI(tk.Tk):
             if t <= 0:
                 raise ValueError
         except (ValueError, AttributeError):
-            self.threshold_hint.config(text="请输入正整数", foreground=COLOR_DANGER)
+            self.threshold_hint.config(text="请输入正整数", style="CardDanger.TLabel")
             return
         sus = int(t * webshell_scanner.SUSPECT_RATIO)
         if t < 100:
-            lvl, color = "极敏感·易误报", COLOR_DANGER
+            lvl, style = "极敏感·易误报", "CardDanger.TLabel"
         elif t < 180:
-            lvl, color = "偏敏感", COLOR_WARNING
+            lvl, style = "偏敏感", "CardWarning.TLabel"
         elif t <= 260:
-            lvl, color = "平衡·推荐", COLOR_SUCCESS
+            lvl, style = "平衡·推荐", "CardSuccess.TLabel"
         elif t <= 400:
-            lvl, color = "偏保守", COLOR_WARNING
+            lvl, style = "偏保守", "CardWarning.TLabel"
         else:
-            lvl, color = "很保守·易漏报", COLOR_DANGER
+            lvl, style = "很保守·易漏报", "CardDanger.TLabel"
         self.threshold_hint.config(
-            text="恶意 ≥%d ｜ 可疑 ≥%d ｜ %s" % (t, sus, lvl), foreground=color)
+            text="恶意 ≥%d ｜ 可疑 ≥%d ｜ %s" % (t, sus, lvl), style=style)
 
     def show_threshold_help(self):
         """弹窗详解检测阈值：代表什么、分数怎么来、高低怎么取舍。"""
@@ -714,7 +689,7 @@ class AWDDfenceGUI(tk.Tk):
         self.btn_scan_save.config(state=DISABLED)
         self.btn_scan_quarantine.config(state=DISABLED)
         self.scan_log.delete(1.0, END)
-        self.scan_summary.config(text="扫描中...", foreground=COLOR_WARNING)
+        self.scan_summary.config(text="扫描中...", style="Warning.TLabel")
 
         def work():
             try:
@@ -739,10 +714,10 @@ class AWDDfenceGUI(tk.Tk):
                 mal = sum(1 for r in results if r["verdict"] == "malicious")
                 sus = len(results) - mal
                 summary = f"扫描 {total} 个文件 | 恶意 {mal} | 可疑 {sus}"
-                self.scan_summary.after(0, lambda: self.scan_summary.config(
-                    text=summary,
-                    foreground=(COLOR_DANGER if mal
-                                else (COLOR_WARNING if sus else COLOR_SUCCESS))))
+                style = ("Danger.TLabel" if mal
+                         else ("Warning.TLabel" if sus else "Success.TLabel"))
+                self.scan_summary.after(0, lambda s=style: self.scan_summary.config(
+                    text=summary, style=s))
                 self.btn_scan_save.after(0, lambda: self.btn_scan_save.config(
                     state=NORMAL if results else DISABLED))
                 # 只有存在「恶意」级结果时才允许处置
@@ -752,7 +727,7 @@ class AWDDfenceGUI(tk.Tk):
             except Exception as exc:
                 self.log_scan(f"[x] 扫描异常: {exc}")
                 self.scan_summary.after(0, lambda: self.scan_summary.config(
-                    text="扫描失败", foreground=COLOR_DANGER))
+                    text="扫描失败", style="Danger.TLabel"))
             finally:
                 self.scan_running = False
                 self.btn_scan_start.after(0, lambda: self.btn_scan_start.config(
@@ -796,7 +771,7 @@ class AWDDfenceGUI(tk.Tk):
 
         self.scan_running = True
         self.btn_scan_quarantine.config(state=DISABLED, text="处理中...")
-        self.scan_summary.config(text="正在生成注释计划...", foreground=COLOR_WARNING)
+        self.scan_summary.config(text="正在生成注释计划...", style="Warning.TLabel")
 
         def work():
             ssh_client = sftp_client = None
@@ -815,7 +790,7 @@ class AWDDfenceGUI(tk.Tk):
                 if not plan:
                     self.log_scan("[!] 没有可安全自动注释的行，未做任何修改")
                     self.scan_log.after(0, lambda: self.scan_summary.config(
-                        text="无可安全注释的行", foreground=COLOR_WARNING))
+                        text="无可安全注释的行", style="Warning.TLabel"))
                     return
 
                 self.log_scan(webshell_scanner.format_quarantine_plan(plan))
@@ -840,7 +815,7 @@ class AWDDfenceGUI(tk.Tk):
                 if not holder.get("ok"):
                     self.log_scan("[*] 已取消，未修改任何文件")
                     self.scan_log.after(0, lambda: self.scan_summary.config(
-                        text="已取消", foreground=COLOR_MUTED))
+                        text="已取消", style="Muted.TLabel"))
                     return
 
                 stats = webshell_scanner.apply_quarantine(
@@ -852,11 +827,11 @@ class AWDDfenceGUI(tk.Tk):
                 self.log_scan("[*] 建议重新执行一次查杀，确认处置效果")
                 self.scan_log.after(0, lambda: self.scan_summary.config(
                     text=f"已注释 {stats['lines']} 行危险代码（{stats['files']} 个文件）",
-                    foreground=COLOR_SUCCESS))
+                    style="Success.TLabel"))
             except Exception as exc:
                 self.log_scan(f"[x] 处置失败: {exc}")
                 self.scan_log.after(0, lambda: self.scan_summary.config(
-                    text="处置失败", foreground=COLOR_DANGER))
+                    text="处置失败", style="Danger.TLabel"))
             finally:
                 for c in (sftp_client, ssh_client):
                     try:
@@ -1432,7 +1407,7 @@ class AWDDfenceGUI(tk.Tk):
         self.waf_lock_hint = ttk.Label(
             control_frame,
             text="",
-            foreground=COLOR_WARNING
+            style="Warning.TLabel"
         )
         self.waf_lock_hint.grid(row=4, column=0, columnspan=4, padx=10, pady=(0, 5), sticky=W)
 
@@ -1706,7 +1681,7 @@ class AWDDfenceGUI(tk.Tk):
                   "PHPWAF_LOG_DIR（默认 /tmp/.phpwaf_logs），"
                   "点「从远端同步」拉取。若列表始终为空，请确认："
                   "① WAF 已部署并生效 ② 业务已有流量被拦截 ③ 日志目录可写。"),
-            foreground=COLOR_MUTED, wraplength=980, justify=LEFT
+            style="Muted.TLabel", wraplength=980, justify=LEFT
         )
         hint.pack(fill=X, pady=(0, 8))
 

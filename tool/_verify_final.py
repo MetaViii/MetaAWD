@@ -82,23 +82,24 @@ chk("GUI", "语义按钮已着色",
 chk("GUI", "多主题可切换",
     "THEMES" in theme_src and "def apply_theme" in theme_src
     and "on_theme_change" in gui_src and "theme_box" in gui_src)
-chk("GUI", "渐变用 Canvas 逐行矩形",
-    "class GradientCanvas" in theme_src and "create_rectangle" in theme_src
-    and "PhotoImage(" not in theme_src)
-chk("GUI", "渐变重绘有防抖",
-    "after(120" in theme_src or "after(120," in theme_src)
-chk("GUI", "侧栏按攻防语义分组",
-    '"ATTACK"' in gui_src and '"DEFENCE"' in gui_src and '"OPS"' in gui_src)
+chk("GUI", "深浅双主题",
+    '"dark"' in theme_src and '"light"' in theme_src
+    and "THEMES" in theme_src)
+chk("GUI", "不再使用渐变",
+    "GradientCanvas" not in theme_src and "create_rectangle" not in theme_src)
+chk("GUI", "侧栏平铺无分组",
+    "NAV_ITEMS" in gui_src and "NAV_GROUPS" not in gui_src)
 chk("GUI", "原生控件深色兜底",
     "darken_native_widgets" in gui_src and "def darken_native_widgets" in theme_src)
 chk("GUI", "已无 ttkbootstrap 依赖",
     "ttkbootstrap" not in gui_src and "ttkb." not in gui_src)
-chk("GUI", "分组侧边栏导航", "NAV_GROUPS" in gui_src and "_build_shell" in gui_src)
+chk("GUI", "侧边栏导航", "NAV_ITEMS" in gui_src and "_build_shell" in gui_src)
 chk("GUI", "页面堆叠切换(非 Notebook)",
     "def _add_page" in gui_src and "def show_page" in gui_src and "Notebook" not in gui_src)
 chk("GUI", "顶栏连接指示", "conn_status" in gui_src and "refresh_conn_status" in gui_src)
-chk("GUI", "语义色常量已定义",
-    "COLOR_DANGER" in gui_src and "bootstyle" not in gui_src)
+chk("GUI", "语义色走主题样式",
+    '"Danger.TLabel"' in gui_src and "COLOR_DANGER" not in gui_src
+    and "bootstyle" not in gui_src)
 chk("GUI", "阈值说明按钮", "阈值说明" in gui_src and "show_threshold_help" in gui_src)
 chk("GUI", "阈值动态提示", "update_threshold_hint" in gui_src)
 chk("查杀", "可疑线与阈值联动",
