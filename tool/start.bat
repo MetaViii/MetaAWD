@@ -1,13 +1,13 @@
 @echo off
 REM ============================================================
-REM  AWD Defence Tool v3.0 - one click launcher (GUI)
+REM  AWD Defence Tool v3.1 - one click launcher (GUI)
 REM  Keep this file pure ASCII: cmd decodes .bat with the
 REM  code page active at startup, so non-ASCII here may break
 REM  on systems whose default code page differs.
 REM ============================================================
 setlocal
 cd /d "%~dp0"
-title AWD Defence Tool v3.0
+title AWD Defence Tool v3.1
 
 set "PY="
 where python >nul 2>&1 && set "PY=python"
