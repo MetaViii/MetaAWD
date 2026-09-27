@@ -339,24 +339,25 @@ class AWDDfenceGUI(tk.Tk):
         self.mon_path.insert(0, "/var/www/html/")
         self.mon_path.grid(row=0, column=1, padx=10, pady=5, sticky=EW)
 
-        # 增加复选框用于控制是否自动删除
-        self.is_auto_delete = tk.IntVar(value=0)
-        self.chk_auto_delete = ttk.Checkbutton(
-            control_frame, 
-            text="自动删除被更改/新增的文件", 
-            variable=self.is_auto_delete, 
-            style="Switch.TCheckbutton"
-        )
-        self.chk_auto_delete.grid(row=0, column=2, padx=10, pady=5)
-
         self.btn_start_mon = ttk.Button(control_frame, text="开始监控", style="Accent.TButton", command=self.start_monitor)
-        self.btn_start_mon.grid(row=0, column=3, padx=10, pady=5)
+        self.btn_start_mon.grid(row=0, column=2, padx=(10, 6), pady=5)
 
         self.btn_pause_mon = ttk.Button(control_frame, text="暂停", command=self.toggle_pause_monitor, state=DISABLED)
-        self.btn_pause_mon.grid(row=0, column=4, padx=10, pady=5)
+        self.btn_pause_mon.grid(row=0, column=3, padx=6, pady=5)
 
         self.btn_stop_mon = ttk.Button(control_frame, text="停止监控", command=self.stop_monitor, state=DISABLED)
-        self.btn_stop_mon.grid(row=0, column=5, padx=10, pady=5)
+        self.btn_stop_mon.grid(row=0, column=4, padx=(6, 10), pady=5)
+
+        # 复选框独占一行：此前它与 5 个控件挤在同一 row，而 column=1 的 Entry
+        # 带 weight=1 会吃掉全部余量，复选框被压到最小宽度，几乎点不到。
+        self.is_auto_delete = tk.IntVar(value=0)
+        self.chk_auto_delete = ttk.Checkbutton(
+            control_frame,
+            text="自动删除被更改/新增的文件",
+            variable=self.is_auto_delete,
+        )
+        self.chk_auto_delete.grid(row=1, column=1, padx=10, pady=(2, 6), sticky=W)
+
         control_frame.columnconfigure(1, weight=1)
 
         log_frame = ttk.LabelFrame(frame, text="监控日志", padding=10)
@@ -464,8 +465,11 @@ class AWDDfenceGUI(tk.Tk):
         self.btn_threshold_help.pack(side=LEFT, padx=(6, 0))
 
         # 随输入实时显示两条判定线（可疑线 = 阈值的 40%，与阈值联动）
+        # 独占一行：早前与 thr_box 挤在同一格、靠 padx=190 硬推开，
+        # 而 thr_box 在 150% DPI 下比 190px 宽，两者直接叠在一起。
         self.threshold_hint = ttk.Label(control_frame, text="", style="CardMuted.TLabel")
-        self.threshold_hint.grid(row=2, column=1, padx=(190, 0), pady=5, sticky=W)
+        self.threshold_hint.grid(row=3, column=1, columnspan=2,
+                                 padx=8, pady=(0, 4), sticky=W)
 
         # 自动删除
         self.scan_auto_delete = tk.IntVar(value=0)
@@ -473,15 +477,14 @@ class AWDDfenceGUI(tk.Tk):
             control_frame,
             text="自动删除恶意文件",
             variable=self.scan_auto_delete,
-            style="Switch.TCheckbutton"
         )
-        self.chk_scan_delete.grid(row=2, column=2, padx=8, pady=5)
+        self.chk_scan_delete.grid(row=2, column=2, padx=8, pady=5, sticky=W)
 
         self.update_threshold_hint()
 
         # 按钮
         btn_frame = ttk.Frame(control_frame)
-        btn_frame.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky=W)
+        btn_frame.grid(row=4, column=0, columnspan=3, pady=(10, 0), sticky=W)
         self.btn_scan_start = ttk.Button(btn_frame, text="开始查杀", style="Accent.TButton", command=self.start_scan)
         self.btn_scan_start.pack(side=LEFT, padx=(0, 10))
         self.btn_scan_save = ttk.Button(btn_frame, text="保存报告", command=self.save_scan_report,
@@ -1059,7 +1062,6 @@ class AWDDfenceGUI(tk.Tk):
             shell_frame,
             text="生成带 key 后门",
             variable=self.attack_with_key,
-            style="Switch.TCheckbutton",
         )
         self.chk_attack_key_shell.grid(row=6, column=1, padx=5, pady=8, sticky=W)
         self.btn_attack_upload = ttk.Button(shell_frame, text="生成新后门并上传", command=self.run_attack_upload)
@@ -1290,7 +1292,6 @@ class AWDDfenceGUI(tk.Tk):
             form,
             text="只探测不提交",
             variable=self.bugku_no_submit,
-            style="Switch.TCheckbutton",
         )
         self.chk_bugku_no_submit.grid(row=4, column=1, padx=6, pady=8, sticky=W)
 
@@ -1391,7 +1392,6 @@ class AWDDfenceGUI(tk.Tk):
             control_frame,
             text="记录全部请求(数据包审查用)",
             variable=self.waf_log_all,
-            style="Switch.TCheckbutton"
         )
         self.chk_waf_log_all.grid(row=4, column=0, columnspan=2, padx=10, pady=(0, 10), sticky=W)
 

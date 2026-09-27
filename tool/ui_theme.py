@@ -295,19 +295,26 @@ def apply_theme(root, name=None):
     st.configure("TSpinbox", fieldbackground=P["surface"], foreground=P["fg"],
                  arrowcolor=P["fg_dim"], bordercolor=P["border"], padding=px(5))
 
-    # 指示器用边框色：深色下够浅、浅色下够深，两种主题都能看清
+    # 指示器用边框色：深色下够浅、浅色下够深，两种主题都能看清。
+    # indicatorsize 实测有效，默认值在 150% DPI 下只有 12px 见方、整控件高 33px，
+    # 太难点；这里放大指示器并加宽上下内边距，把点击区撑到约 44px 高。
     st.configure("TCheckbutton", background=P["bg"], foreground=P["fg"],
-                 indicatorcolor=P["border"], focuscolor=P["bg"])
+                 indicatorcolor=P["border"], focuscolor=P["bg"],
+                 indicatorsize=px(17), indicatormargin=px(7),
+                 padding=(px(3), px(7)), font=FONT_UI)
     st.map("TCheckbutton",
            background=[("active", P["bg"])],
-           indicatorcolor=[("selected", P["accent"]), ("active", P["fg_dis"])],
+           indicatorcolor=[("selected", P["accent"]), ("active", P["fg_dim"])],
            foreground=[("disabled", P["fg_dis"])])
 
     st.configure("TRadiobutton", background=P["bg"], foreground=P["fg"],
-                 indicatorcolor=P["border"], focuscolor=P["bg"])
+                 indicatorcolor=P["border"], focuscolor=P["bg"],
+                 indicatorsize=px(15), indicatormargin=px(7),
+                 padding=(px(3), px(6)), font=FONT_UI)
     st.map("TRadiobutton",
            background=[("active", P["bg"])],
-           indicatorcolor=[("selected", P["accent"]), ("active", P["fg_dis"])])
+           indicatorcolor=[("selected", P["accent"]), ("active", P["fg_dim"])],
+           foreground=[("disabled", P["fg_dis"])])
 
     # ---- 表格 ----
     st.configure("Treeview", background=P["surface"], fieldbackground=P["surface"],

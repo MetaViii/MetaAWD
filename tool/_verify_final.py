@@ -89,6 +89,14 @@ chk("GUI", "不再使用渐变",
     "GradientCanvas" not in theme_src and "create_rectangle" not in theme_src)
 chk("GUI", "侧栏平铺无分组",
     "NAV_ITEMS" in gui_src and "NAV_GROUPS" not in gui_src)
+chk("GUI", "阈值提示独占一行（不叠在输入框上）",
+    "self.threshold_hint.grid(row=3" in gui_src
+    and "padx=(190, 0)" not in gui_src)
+chk("GUI", "复选框已放大且无失效样式引用",
+    "indicatorsize=px(" in theme_src
+    and "Switch.TCheckbutton" not in gui_src)
+chk("GUI", "监控页复选框独占一行",
+    'self.chk_auto_delete.grid(row=1' in gui_src)
 chk("GUI", "原生控件深色兜底",
     "darken_native_widgets" in gui_src and "def darken_native_widgets" in theme_src)
 chk("GUI", "已无 ttkbootstrap 依赖",
