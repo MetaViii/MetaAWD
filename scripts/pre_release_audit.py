@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = Path(__file__).resolve().parents[1]
 
 # 高危：真实凭据 / 比赛数据 / 靶机
 CRITICAL = [
@@ -39,7 +39,8 @@ ALLOW = [
 ]
 
 SKIP_SUFFIX = {".exe", ".png", ".jpg", ".ico", ".zip", ".pyc", ".git"}
-SKIP_PARTS = {"__pycache__", ".git", "releases"}
+# dshield-reverse 为本地研究目录，不入库，因此不参与发布审计
+SKIP_PARTS = {"__pycache__", ".git", "releases", "dshield-reverse"}
 # 本脚本自身只含正则定义，扫描它会把自己的模式串当成命中
 SELF = Path(__file__).resolve()
 
