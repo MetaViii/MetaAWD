@@ -2,11 +2,14 @@ import os
 import posixpath
 import re
 import shlex
+import tempfile
 from pathlib import Path
-from stat import S_ISDIR
+from stat import S_ISREG
+from uuid import uuid4
 
 from defence import ssh
 from defence._bootstrap import get_resource_dir, get_runtime_dir
+from defence.request_logs import read_request_text
 from defence.state import state_manager
 
 
@@ -185,25 +188,37 @@ def ensure_remote_waf_dir(remote_dir, log_callback=print, ensure_writable=False)
         ssh_client.close()
 
 
-def upload_waf(remote_dir=None, log_callback=print):
+def upload_waf(remote_dir=None, log_callback=print, *, update_only=False):
     remote_dir = get_remote_waf_dir(remote_dir)
     remote_waf_path = get_remote_waf_path(remote_dir)
     php_major, version_text = detect_remote_php_major(log_callback)
     local_waf_loader_path = get_local_waf_loader_path(php_major)
-    temp_remote_waf_path = f"{remote_dir}/.{Path(local_waf_loader_path).stem}_{php_major}_{os.getpid()}.php"
+    temp_remote_waf_path = f"{remote_dir}/.waf-{uuid4().hex}.part"
     ssh_client, sftp_client = ssh.connect_sftp_client()
     try:
         try:
             sftp_client.stat(remote_dir)
         except OSError:
             raise FileNotFoundError(f"远端目录不存在: {remote_dir}")
+        if update_only:
+            if not S_ISREG(sftp_client.lstat(remote_waf_path).st_mode):
+                raise RuntimeError(f"未找到可更新的 WAF 模板: {remote_waf_path}")
+            directory = get_local_log_dir() / "templates"
+            directory.mkdir(exist_ok=True)
+            backup = directory / f"waf-{uuid4().hex}.php"
+            sftp_client.get(remote_waf_path, str(backup))
+            log_callback(f"已在本机备份 WAF 模板: {backup}")
         sftp_client.put(str(local_waf_loader_path), temp_remote_waf_path)
         try:
-            sftp_client.remove(remote_waf_path)
+            sftp_client.posix_rename(temp_remote_waf_path, remote_waf_path)
         except OSError:
-            pass
-        sftp_client.rename(temp_remote_waf_path, remote_waf_path)
-        sftp_client.stat(remote_waf_path)
+            # 不支持 SFTP 扩展时，在同一目录原子替换。失败时保留已部署的模板。
+            _, stdout, stderr = ssh_client.exec_command(
+                f"mv -fT -- {shlex.quote(temp_remote_waf_path)} {shlex.quote(remote_waf_path)}"
+            )
+            reason = stderr.read().decode("utf-8", errors="replace").strip()
+            if stdout.channel.recv_exit_status():
+                raise OSError(reason or "远端 WAF 模板替换失败")
         state_manager.remote_waf_dir = remote_dir
         state_manager.remote_waf_path = remote_waf_path
         # 注意：此处不置 waf_deployed=True —— 仅上传文件还不算防护生效，
@@ -211,6 +226,10 @@ def upload_waf(remote_dir=None, log_callback=print):
         log_callback(f"✓ 已上传 PHP{php_major} 版本 WAF: {remote_waf_path}")
         return remote_waf_path
     finally:
+        try:
+            sftp_client.remove(temp_remote_waf_path)
+        except OSError:
+            pass
         sftp_client.close()
         ssh_client.close()
 
@@ -486,42 +505,82 @@ def check_and_restore_waf(remote_dir=None, log_callback=print):
     return True
 
 
-def sync_remote_logs(remote_dir=None, log_callback=print):
+def sync_remote_logs(remote_dir=None, log_callback=print, *, on_new_file=None,
+                     raise_on_transport_error=False, io_timeout=None, stop_event=None):
     """把远端 WAF 记录的请求包拉到本地。
 
     逐条容错：单个文件下载/删除失败只跳过该文件，不中断整批同步。
     下载成功后才删除远端文件，避免下载失败却已丢失日志。
+    on_new_file 在新日志保存到本机后调用，同名文件重复同步时不重复通知。
     """
     remote_dir = get_remote_waf_log_dir(remote_dir)
     local_dir = get_local_log_dir()
     downloaded = []
     failed = 0
+    transport_errors = (ConnectionError, EOFError, TimeoutError)
     ssh_client = None
     sftp_client = None
     try:
-        ssh_client, sftp_client = ssh.connect_sftp_client()
+        if stop_event is not None and stop_event.is_set():
+            return downloaded
+        options = {"io_timeout": io_timeout} if io_timeout is not None else {}
+        ssh_client, sftp_client = ssh.connect_sftp_client(**options)
+        if stop_event is not None and stop_event.is_set():
+            return downloaded
         try:
             entries = sftp_client.listdir_attr(remote_dir)
-        except OSError:
-            log_callback(f"⚠ 远端日志目录不存在或不可访问: {remote_dir}")
+        except OSError as exc:
+            message = f"远端日志目录不存在或不可访问: {remote_dir}"
+            if raise_on_transport_error:
+                if isinstance(exc, transport_errors):
+                    raise
+                raise OSError(message) from exc
+            log_callback(f"⚠ {message}")
             return downloaded
         for entry in entries:
-            if S_ISDIR(entry.st_mode) or not entry.filename.endswith(".http"):
+            if stop_event is not None and stop_event.is_set():
+                break
+            if not S_ISREG(entry.st_mode) or not entry.filename.endswith(".http"):
                 continue
-            remote_path = f"{remote_dir}/{entry.filename}"
-            local_path = local_dir / entry.filename
-            try:
-                sftp_client.get(remote_path, str(local_path))
-            except Exception as exc:
+            name = entry.filename
+            if any(char in name for char in '/\\:*?"<>|\x00'):
                 failed += 1
-                log_callback(f"⚠ 下载失败(已跳过) {entry.filename}: {exc}")
+                log_callback("⚠ 跳过不能安全保存到本地的日志文件名")
                 continue
+            remote_path = f"{remote_dir}/{name}"
+            local_path = local_dir / name
+            staging = None
+            try:
+                new_file = on_new_file is not None and not local_path.exists()
+                with tempfile.NamedTemporaryFile(dir=local_dir, suffix=".part", delete=False) as temp:
+                    staging = Path(temp.name)
+                sftp_client.get(remote_path, str(staging))
+                remote_mtime = getattr(entry, "st_mtime", None)
+                if remote_mtime is not None:
+                    os.utime(staging, (remote_mtime, remote_mtime))
+                os.replace(staging, local_path)
+            except Exception as exc:
+                if raise_on_transport_error and isinstance(exc, transport_errors):
+                    raise
+                failed += 1
+                log_callback(f"⚠ 下载失败(已跳过) {name}: {exc}")
+                continue
+            finally:
+                if staging is not None:
+                    try:
+                        staging.unlink(missing_ok=True)
+                    except OSError as exc:
+                        log_callback(f"⚠ 临时日志清理失败: {exc}")
+            downloaded.append(str(local_path))
+            if new_file:
+                on_new_file(local_path)
             try:
                 sftp_client.remove(remote_path)
             except Exception as exc:
+                if raise_on_transport_error and isinstance(exc, transport_errors):
+                    raise
                 # 文件已落到本地，删除远端失败不影响使用，仅提示避免重复同步
                 log_callback(f"• 远端清理失败(下次可能重复同步) {entry.filename}: {exc}")
-            downloaded.append(str(local_path))
             log_callback(f"↓ 已同步日志: {entry.filename}")
         if failed:
             log_callback(f"• 本次有 {failed} 个日志下载失败，已跳过")
@@ -538,19 +597,25 @@ def sync_remote_logs(remote_dir=None, log_callback=print):
 def list_local_request_logs(hostname=None):
     local_dir = get_local_log_dir(hostname)
     files = []
-    for path in sorted(local_dir.glob("*.http"), key=lambda item: item.stat().st_mtime, reverse=True):
-        stat = path.stat()
+    for path in local_dir.glob("*.http"):
+        try:
+            stat = path.lstat()
+        except FileNotFoundError:
+            continue
+        if not S_ISREG(stat.st_mode):
+            continue
         files.append({
             "name": path.name,
             "path": str(path),
             "size": stat.st_size,
             "mtime": stat.st_mtime,
+            "revision": (stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size),
         })
-    return files
+    return sorted(files, key=lambda item: item["mtime"], reverse=True)
 
 
 def read_local_request_log(file_path):
-    return Path(file_path).read_text(encoding="utf-8", errors="replace")
+    return read_request_text(file_path)
 
 
 def clear_local_request_logs(hostname=None):

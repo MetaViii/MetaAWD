@@ -40,11 +40,17 @@ xref_db.pkl
 # ---- 构建产物 ----
 build/
 dist/
+tool/.venv/
+tool/desktop_ui/node_modules/
 *.spec.bak
 __pycache__/
 *.py[cod]
 # 历史发布产物（已被新版本取代，仅留在本地）
 releases/AWD-Defence-Tool-*.exe
+# 桌面版发行包：只提交当前版本，旧版本与中间产物留在本地
+releases/MetaAWD-Desktop.exe
+releases/MetaAWD-Desktop-20261118.exe
+releases/MetaAWD-Desktop-20261118-Attacker.exe
 *.egg-info/
 .pytest_cache/
 .mypy_cache/

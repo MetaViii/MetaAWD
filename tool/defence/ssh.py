@@ -20,22 +20,31 @@ def run_ssh_command(ssh_client, command):
     return out, err
 
 
-def connect_ssh_client(hostname=None, port=None, username=None, password=None, timeout=10):
+def connect_ssh_client(hostname=None, port=None, username=None, password=None, timeout=10, *, host_key=None):
     """建立 SSH 连接。
 
     连接失败时必须显式 close：paramiko 的 connect() 失败路径不会关闭已启动的
     Transport，而 Transport 由后台线程持有强引用，不会因局部变量出栈被回收，
     每次失败都会泄漏一个线程+socket（密码错误在 AWD 中高频出现）。
     """
+    hostname = hostname or state_manager.hostname
+    port = port or state_manager.port
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    limits = {}
+    if host_key is None:
+        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    else:
+        identity = hostname if port == 22 else f"[{hostname}]:{port}"
+        ssh_client.get_host_keys().add(identity, host_key.get_name(), host_key)
+        limits = {"banner_timeout": timeout, "auth_timeout": timeout}
     try:
         ssh_client.connect(
-            hostname=hostname or state_manager.hostname,
-            port=port or state_manager.port,
+            hostname=hostname,
+            port=port,
             username=username or state_manager.username,
-            password=password or state_manager.password,
-            timeout=timeout
+            password=state_manager.password if password is None else password,
+            timeout=timeout,
+            **limits,
         )
     except Exception:
         try:
@@ -46,20 +55,31 @@ def connect_ssh_client(hostname=None, port=None, username=None, password=None, t
     return ssh_client
 
 
-def connect_sftp_client(hostname=None, port=None, username=None, password=None, timeout=10):
+def connect_sftp_client(hostname=None, port=None, username=None, password=None,
+                        timeout=10, *, io_timeout=None):
     ssh_client = connect_ssh_client(hostname, port, username, password, timeout)
+    opening_timeout = None
     try:
+        if io_timeout is not None:
+            opening_timeout = threading.Timer(io_timeout, ssh_client.close)
+            opening_timeout.daemon = True
+            opening_timeout.start()
         sftp_client = ssh_client.open_sftp()
+        if io_timeout is not None:
+            sftp_client.get_channel().settimeout(io_timeout)
     except Exception:
         try:
             ssh_client.close()
         except Exception:
             pass
         raise
+    finally:
+        if opening_timeout is not None:
+            opening_timeout.cancel()
     return ssh_client, sftp_client
 
 
-def ssh_test(hostname=None, port=None, username=None, password=None, log_callback=print):
+def ssh_test(hostname=None, port=None, username=None, password=None, log_callback=print, *, on_verified=None):
     has_conn = (state_manager.is_ssh and state_manager.hostname != '' and state_manager.port != 0
                 and state_manager.username != '' and state_manager.password != '')
     if has_conn:
@@ -85,6 +105,8 @@ def ssh_test(hostname=None, port=None, username=None, password=None, log_callbac
     ssh_client = None
     try:
         ssh_client = connect_ssh_client()
+        if on_verified is not None:
+            on_verified(ssh_client.get_transport().get_remote_server_key())
         log_callback(colored("SSH 连接成功！", 'green'))
         state_manager.is_ssh = True
         return True

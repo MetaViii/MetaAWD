@@ -2827,7 +2827,9 @@ def format_report(results, total, threshold=DEFAULT_THRESHOLD):
     for r in results:
         mark = "【恶意】" if r["verdict"] == "malicious" else "【可疑】"
         state = r.get("dispose_state", "none")
-        if state == "quarantined":
+        if r.get("removed"):
+            tag = "[已备份并移除] "
+        elif state == "quarantined":
             tag = "[已注释] "
         elif state == "partial":
             tag = "[部分已注释] "
@@ -2844,9 +2846,11 @@ def format_report(results, total, threshold=DEFAULT_THRESHOLD):
     mal = sum(1 for r in results if r["verdict"] == "malicious")
     sus = len(results) - mal
     q = sum(1 for r in results if r.get("dispose_state") == "quarantined")
+    removed = sum(1 for r in results if r.get("removed"))
     lines.append("-" * 78)
     lines.append(f"  合计: 恶意 {mal} 个，可疑 {sus} 个"
-                 + (f"，其中已注释处置 {q} 个" if q else ""))
+                 + (f"，其中已注释处置 {q} 个" if q else "")
+                 + (f"，已备份并移除 {removed} 个" if removed else ""))
     return "\n".join(lines)
 
 

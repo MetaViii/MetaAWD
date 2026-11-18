@@ -1,4 +1,6 @@
-# MetaAWD v3.3 使用说明
+# MetaAWD 旧版 Tkinter 使用说明
+
+> 本文保留旧版 Tkinter 界面及 v3.0–v3.3 的功能记录。新版防御工作台用 `start.bat` 启动。新版的安装、请求审查与维护分别见[项目首页](../README.md)和[维护交接](../docs/README.md)。
 
 这是一个面向 AWD/CTF 场景的辅助工具（图形界面版），包含 SSH 连接、源码打包下载、
 文件监控、**木马查杀（WebShell 检测）**、WAF 部署、请求包审查、交互终端、
@@ -250,13 +252,16 @@ GUI 对应「木马查杀」选项卡。
 
 ```text
 .
-├── gui_main.py                     # GUI 入口
-├── launcher.py                     # 环境自检 + 启动
-├── start.bat                       # 双击启动（纯 ASCII，见下方说明）
-├── build.spec                      # PyInstaller 打包配置
+├── gui_main.py                     # 旧版 Tkinter 入口
+├── launcher.py                     # 环境自检与桌面入口分发
+├── start.bat                       # 双击启动新版防御工作台
+├── desktop.py / desktop_api.py    # 新版桌面宿主、桥接与业务调度
+├── desktop_ui/                     # 新版 React 前端
+├── build.spec                      # 旧版 PyInstaller 打包配置
 ├── Attacker.py                     # 旧版辅助脚本（独立可用，不依赖本项目）
 ├── bugku_pvp_backdoor_submit.py    # 旧版 Bugku 提交脚本（独立可用）
-├── requirements.txt                # Python 依赖
+├── requirements.txt                # 共享 Python 依赖
+├── desktop-requirements.txt        # 新版桌面 Python 依赖
 ├── README.md / FIXES.md            # 使用说明 / 缺陷修复记录
 ├── defence/
 │   ├── _bootstrap.py               # 冻结环境路径适配
@@ -265,7 +270,8 @@ GUI 对应「木马查杀」选项卡。
 │   ├── webshell_scanner.py         # ★ 木马查杀引擎
 │   ├── waf_manager.py              # WAF 上传、注入、下线、日志同步
 │   ├── attacker_tools.py           # 探活、后门检测、命令执行、生成新后门、Bugku 提交
-│   ├── state.py                    # 运行状态保存
+│   ├── request_logs.py             # 新旧请求日志的解析与导出
+│   ├── state.py                    # 进程内共享运行状态
 │   └── phpwaf/                     # PHP WAF 模板（php5/7/8）
 └── tmp/                            # 本地运行数据、源码包、WAF 日志、查杀报告
 ```
@@ -280,40 +286,32 @@ python -m pip install -r requirements.txt
 
 ## 启动方式
 
-### 方式一：独立 exe（推荐，目标机无需 Python）
+### 旧版独立 EXE
 
-用打包版：把 `MetaAWD-v3.3.exe` 拷到目标机双击即可。
+在运行工具的 Windows 电脑上双击 `MetaAWD-v3.5.exe` 即可打开 Tkinter 界面。程序自带 Python 运行环境。[发布目录](../releases/)
 
 数据目录 `tmp/` 会生成在 **exe 同级目录**。
 
-### 方式二：源码运行
+### 旧版源码入口
 
 ```bash
 python launcher.py          # 自检依赖并启动界面
 python launcher.py check    # 只做环境自检
 ```
 
-或直接双击 `start.bat`。
+### 新版防御工作台
+
+双击 `start.bat` 会打开新版桌面工作台。运行 `start.bat --check` 可以检查前端入口和 Python 依赖。首次安装与构建见[项目根目录的启动说明](../README.md#快速开始)。
 
 > `start.bat` 保持纯 ASCII：cmd 会按**启动时**的代码页解码整个 bat 文件，
 > `chcp` 只影响输出、无法补救已解码的内容，把中文写进 bat 会在部分环境下变乱码。
 > 中文提示统一由 `launcher.py` 输出。
 
-### 重新打包 exe
-
-```bash
-python -m pip install pyinstaller
-python build_release.py            # 校验 -> 打包 -> 验证 -> 部署到 releases/
-# 产物: dist/MetaAWD-v3.3.exe
-```
-
-## GUI 使用说明
+## Tkinter 界面使用说明
 
 ```bash
 python gui_main.py
 ```
-
-或双击 `start.bat`（会自动检查依赖）。
 
 ### 1. SSH 配置
 
@@ -722,6 +720,8 @@ https://ctf.bugku.com/pvp/submit.html?token=<token>&flag=<flag>
 
 用途：查看 WAF 同步到本地的原始请求包。
 
+新版工作台用「请求审查」中的「同步请求」或「自动同步」独立拉取日志。[新版请求审查](../README.md#查看站点收到的请求)
+
 使用步骤：
 
 1. 先在 `WAF设置` 中部署 WAF。
@@ -1118,6 +1118,8 @@ scan
 
 ### WAF 请求包没有同步
 
+下面是 Tkinter 的检查项。新版的同步开关、间隔和日志目录见[交接说明](../docs/README.md#请求审查的数据流)。
+
 检查：
 
 - WAF 是否已部署。
@@ -1196,10 +1198,11 @@ attacker_flag_results.jsonl
 
 ### 发布构建
 
-> **改动源码后必须重新构建 exe** —— 否则 `releases/` 里分发的仍是旧版本。
+此流程用于重新发布 Tkinter 版 EXE。新版防御工作台有独立的构建配置。[构建新版 Windows EXE](../docs/README.md#构建新版-windows-exe)
 
 ```bash
 cd tool
+python -m pip install pyinstaller
 python build_release.py           # 校验 -> 打包 -> 部署到 ../releases/
 python build_release.py --check   # 只校验版本一致性，不打包
 ```
@@ -1207,8 +1210,8 @@ python build_release.py --check   # 只校验版本一致性，不打包
 脚本流程：
 
 1. 校验 `launcher.py` 的 `VERSION` 与 `build.spec` 的 `name` 是否一致（不一致直接退出）
-2. 调用 PyInstaller 打包（产物落在 `dist/`）
-3. 复制到 `../releases/`，并列出该目录下的全部产物
+2. 以 `gui_main.py` 为入口调用 PyInstaller，当前产物为 `dist/MetaAWD-v3.5.exe`
+3. 检查产物存在且大小符合要求，再复制到 `../releases/`
 
 **升级版本号时需同步修改 2 处**：
 
@@ -1224,14 +1227,14 @@ python build_release.py --check   # 只校验版本一致性，不打包
 
 ```bash
 # 用 pyinstxtractor 解包，检查 defence/webshell_scanner 是否打进了 PYZ
-pyinstxtractor dist/MetaAWD-v3.3.exe
+pyinstxtractor dist/MetaAWD-v3.5.exe
 ```
 
 
 语法检查：
 
-```bash
-python -m py_compile gui_main.py launcher.py defence/*.py
+```powershell
+python -m compileall -q gui_main.py launcher.py defence
 ```
 
 GUI 导入检查：

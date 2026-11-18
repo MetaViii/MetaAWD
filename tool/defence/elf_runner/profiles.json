@@ -1,0 +1,44 @@
+[
+  {
+    "id": "kernel",
+    "label": "挂载与内核管理",
+    "description": "限制挂载、重启、交换空间、内核模块和 BPF 管理。",
+    "syscalls": {"mount": 165, "umount2": 166, "swapon": 167, "swapoff": 168, "reboot": 169, "init_module": 175, "delete_module": 176, "kexec_load": 246, "finit_module": 313, "kexec_file_load": 320, "bpf": 321, "open_tree": 428, "move_mount": 429, "fsopen": 430, "fsconfig": 431, "fsmount": 432, "fspick": 433, "mount_setattr": 442}
+  },
+  {
+    "id": "debug",
+    "label": "跨进程调试",
+    "description": "限制 ptrace 和跨进程内存读写。",
+    "syscalls": {"ptrace": 101, "process_vm_readv": 310, "process_vm_writev": 311}
+  },
+  {
+    "id": "connect",
+    "label": "主动连接",
+    "description": "限制 connect 调用。依赖数据库、DNS 或 Unix 套接字连接的服务需验证。",
+    "syscalls": {"connect": 42}
+  },
+  {
+    "id": "file-mutation",
+    "label": "删除和重命名文件",
+    "description": "限制删除和重命名。依赖临时文件替换或日志轮转的服务需验证。",
+    "syscalls": {"rename": 82, "unlink": 87, "unlinkat": 263, "renameat": 264, "renameat2": 316}
+  },
+  {
+    "id": "file-handle",
+    "label": "按文件句柄打开",
+    "description": "限制通过内核文件句柄打开文件。",
+    "syscalls": {"open_by_handle_at": 304}
+  },
+  {
+    "id": "socket-setup",
+    "label": "建立套接字连接或监听",
+    "description": "限制创建、连接、绑定和监听套接字。依赖这些操作的服务需验证。",
+    "syscalls": {"socket": 41, "connect": 42, "bind": 49, "listen": 50, "socketpair": 53}
+  },
+  {
+    "id": "new-tasks",
+    "label": "创建进程和线程",
+    "description": "限制创建进程与线程。使用线程池或子进程的服务需验证。",
+    "syscalls": {"clone": 56, "fork": 57, "vfork": 58, "clone3": 435}
+  }
+]

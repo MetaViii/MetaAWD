@@ -11,6 +11,7 @@ chcp 只影响输出、无法补救已解码的内容。因此中文提示统一
 用法:
     python launcher.py          # 启动 GUI
     python launcher.py check    # 只做环境自检
+    python launcher.py desktop  # 启动新版桌面工作台
 """
 import os
 import subprocess
@@ -142,7 +143,7 @@ def main():
     mode = (sys.argv[1].lower() if len(sys.argv) > 1 else "gui")
 
     info(LINE)
-    info(f"   MetaAWD v{VERSION}   (by metavi)")
+    info("   MetaAWD 防御工作台" if mode == "desktop" else f"   MetaAWD v{VERSION}   (by metavi)")
     info(f"   Python {sys.version.split()[0]} @ {sys.executable}")
     info(LINE)
     info("")
@@ -150,13 +151,18 @@ def main():
     if not check_python():
         sys.exit(1)
 
+    if mode == "desktop":
+        from desktop import main as launch_desktop
+
+        sys.exit(launch_desktop(check_only="--check" in sys.argv[2:]))
+
     if not ensure_deps():
         sys.exit(1)
 
     if mode == "check":
         info("[OK] 环境自检通过，可以正常启动")
         info("")
-        info("     双击 start.bat 即可打开界面")
+        info("     运行 python launcher.py 可打开 Tkinter 界面")
         sys.exit(0)
 
     # 让项目根目录可被 import（gui_main 依赖同目录的 defence 包）

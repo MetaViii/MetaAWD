@@ -298,25 +298,11 @@ function wafBuildRawRequest($snapshot)
     $method = $snapshot['method'] !== '' ? $snapshot['method'] : 'GET';
     $uri = $snapshot['uri'] !== '' ? $snapshot['uri'] : '/';
     $protocol = $snapshot['protocol'] !== '' ? $snapshot['protocol'] : 'HTTP/1.1';
-    $headers = $snapshot['headers'];
-    $rawBody = $snapshot['raw_body'];
-
-    if (!isset($headers['Cookie']) && !empty($snapshot['cookie'])) {
-        $cookiePairs = array();
-        foreach ($snapshot['cookie'] as $key => $value) {
-            $cookiePairs[] = $key . '=' . $value;
-        }
-        $headers['Cookie'] = implode('; ', $cookiePairs);
-    }
-    if ($rawBody !== '' && !isset($headers['Content-Length'])) {
-        $headers['Content-Length'] = strlen($rawBody);
-    }
-
     $lines = array($method . ' ' . $uri . ' ' . $protocol);
-    foreach ($headers as $key => $value) {
+    foreach ($snapshot['headers'] as $key => $value) {
         $lines[] = $key . ': ' . $value;
     }
-    return implode("\r\n", $lines) . "\r\n\r\n" . $rawBody;
+    return implode("\r\n", $lines) . "\r\n\r\n" . $snapshot['raw_body'];
 }
 
 function wafGetStorageDir()
@@ -338,7 +324,7 @@ function wafLogAll()
     return false;
 }
 
-function saveRequest($rawRequest)
+function saveRequest($snapshot, $decision, $matchedFields)
 {
     $storageDir = wafGetStorageDir();
     if (!is_dir($storageDir) || !is_writable($storageDir)) {
@@ -353,7 +339,33 @@ function saveRequest($rawRequest)
         }
     }
     $file = $storageDir . DIRECTORY_SEPARATOR . date('Ymd_His') . '_' . wafGetRandomSuffix() . '.http';
-    return file_put_contents($file, $rawRequest) !== false ? $file : false;
+    $areas = array();
+    foreach (array_keys($matchedFields) as $field) {
+        $parts = explode('.', $field, 2);
+        $areas[$parts[0]] = true;
+    }
+    $hasBody = $snapshot['raw_body'] !== '';
+    $expectedBody = !empty($snapshot['post']) || !empty($snapshot['files'])
+        || (isset($_SERVER['CONTENT_LENGTH']) && (int) $_SERVER['CONTENT_LENGTH'] > 0)
+        || !empty($_SERVER['HTTP_TRANSFER_ENCODING']);
+    $metadata = array(
+        'captured_at' => $snapshot['time'],
+        'peer_ip' => $snapshot['remote_addr'],
+        'decision' => $decision,
+        'matched_areas' => array_keys($areas),
+        'body_state' => $hasBody ? 'captured' : ($expectedBody ? 'unavailable' : 'empty'),
+    );
+    $encoded = function_exists('json_encode') ? json_encode($metadata) : false;
+    $preface = $encoded === false ? '' : "# MetaAWD-HTTP/1 " . $encoded . "\r\n";
+    $rawRequest = wafBuildRawRequest($snapshot);
+    $staging = $file . '.part';
+    $written = @file_put_contents($staging, array($preface, $rawRequest));
+    if ($written !== strlen($preface) + strlen($rawRequest) || !@rename($staging, $file)) {
+        @unlink($staging);
+        error_log('PHPWAF could not save request log');
+        return false;
+    }
+    return $file;
 }
 
 function wafSanitizeResponse($buffer)
@@ -363,7 +375,7 @@ function wafSanitizeResponse($buffer)
 
 $blacklist = wafGetBlacklist();
 $originalSnapshot = array(
-    'time' => date('Y-m-d H:i:s'),
+    'time' => isset($_SERVER['REQUEST_TIME_FLOAT']) ? (float) $_SERVER['REQUEST_TIME_FLOAT'] : microtime(true),
     'method' => isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : '',
     'uri' => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
     'query_string' => isset($_SERVER['QUERY_STRING']) ? $_SERVER['QUERY_STRING'] : '',
@@ -376,7 +388,6 @@ $originalSnapshot = array(
     'cookie' => $_COOKIE,
     'files' => $_FILES,
 );
-$originalSnapshot['raw_request'] = wafBuildRawRequest($originalSnapshot);
 
 $matchedKeywords = array();
 $matchedFields = array();
@@ -415,9 +426,14 @@ $file = $_FILES;
 $request = $_REQUEST;
 
 if ($suspicious || wafLogAll()) {
-    saveRequest($originalSnapshot['raw_request']);
+    $redirectRequest = $suspicious && wafGetMode() === 2;
+    $decision = $suspicious ? 'matched' : 'observed';
+    if ($redirectRequest) {
+        $decision = headers_sent() ? 'terminated' : 'redirected';
+    }
+    saveRequest($originalSnapshot, $decision, $matchedFields);
     // 注意 exit 只在确实命中拦截条件时执行：全量记录模式下正常请求不能被拦
-    if ($suspicious && wafGetMode() === 2) {
+    if ($redirectRequest) {
         $redirect = wafGetRedirectPath();
         if (!headers_sent()) {
             header('Location: ' . $redirect, true, 302);

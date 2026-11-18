@@ -298,10 +298,14 @@ def deploy_tar(local_tar_path, remote_path="/var/www/html/", log_callback=print)
                     pass
 
 
-def monitor_directory_changes(hostname, port, username, password, directory_path, is_delete, log_callback=print, is_gui=False):
+def monitor_directory_changes(hostname, port, username, password, directory_path, is_delete,
+                              log_callback=print, is_gui=False, stop_event=None, ready_callback=None):
     global is_running, is_paused
     is_running = True
     is_paused = False
+
+    def running():
+        return is_running and (stop_event is None or not stop_event.is_set())
 
     def stop_monitoring():
         log_callback(colored("正在停止文件监控...", 'red'))
@@ -309,7 +313,7 @@ def monitor_directory_changes(hostname, port, username, password, directory_path
         is_running = False
 
     def input_listener():
-        while is_running:
+        while running():
             user_input = input()
             if user_input.strip().lower() == "end":
                 stop_monitoring()
@@ -319,9 +323,11 @@ def monitor_directory_changes(hostname, port, username, password, directory_path
 
     client = None
     try:
+        if not running():
+            return
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(hostname, port, username=username, password=password)
+        client.connect(hostname, port, username=username, password=password, timeout=10)
 
         md5_dict = {}
         counter = 0
@@ -330,7 +336,7 @@ def monitor_directory_changes(hostname, port, username, password, directory_path
         # 会永久刷错误却仍显示"运行中"，防守方在无监控状态下裸奔。
         max_failures = 5
 
-        while is_running:
+        while running():
             if is_paused:
                 time.sleep(1)
                 continue
@@ -347,6 +353,8 @@ def monitor_directory_changes(hostname, port, username, password, directory_path
                     # 的空结果只可能是"目录确实为空"，不会被误当成失败基线。
                     md5_dict = dict(new_md5_dict)
                     log_callback(f"初检完成，共记录 {len(md5_dict)} 个文件")
+                    if ready_callback is not None:
+                        ready_callback()
                 else:
                     # 对比检测
                     for file_path, new_md5 in new_md5_dict.items():
