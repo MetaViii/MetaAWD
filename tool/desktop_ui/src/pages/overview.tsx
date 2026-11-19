@@ -7,7 +7,7 @@ import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, 
 import { Empty, PageHeading, Panel, Status, type Workspace } from "@/components/workspace"
 import { monitorLabels } from "@/lib/desktop"
 
-export type Page = "overview" | "ssh" | "terminal" | "monitor" | "scan" | "waf" | "pwn" | "packets" | "backup" | "activity" | "probe" | "attacker" | "bugku"
+export type Page = "overview" | "ssh" | "terminal" | "monitor" | "scan" | "waf" | "pwn" | "pwnForward" | "packets" | "backup" | "activity" | "probe" | "attacker" | "bugku"
 
 function Metric({ label, value, icon: Icon, detail }: {
   label: string; value: string | number; icon: LucideIcon; detail: string

@@ -2,6 +2,8 @@
 
 这份手册面向第一次接手 MetaAWD 防御工作台的开发者和 agent。它按实际改动给出入口，并说明哪些文件需要一起改、如何离线验证和如何生成新版 EXE。
 
+如果你要了解各模块怎么使用，请先阅读 [新版工作台使用手册](使用手册.md)。本页主要用于开发维护与打包。
+
 ## 先找到你要改的地方
 
 | 改动 | 从哪里开始 | 改完先验证什么 |
@@ -53,7 +55,8 @@ React 页面 → callDesktop → invoke(method, args) → DesktopService → def
 | 文件监控 `monitor` | 同文件的 `MonitorPage` | `start-monitor`、`pause-monitor`、`stop-monitor` → [file_processing.py](../tool/defence/file_processing.py) |
 | WebShell 查杀 `scan` | [scanner.tsx](../tool/desktop_ui/src/pages/scanner.tsx) 的 `ScannerPage` | `scan`、`scan_results`、`report`、注释预览与应用 → [webshell_scanner.py](../tool/defence/webshell_scanner.py) |
 | WAF 管理 `waf` | [operations.tsx](../tool/desktop_ui/src/pages/operations.tsx) 的 `WafPage` | 部署、模板更新、下线和守护 → [waf_manager.py](../tool/defence/waf_manager.py) 与 [PHP 模板](../tool/defence/phpwaf/) |
-| PWN 防护 `pwn` | [pwn.tsx](../tool/desktop_ui/src/pages/pwn.tsx) 的 `PwnPage` | `pwn_audit`、`pwn_plan`、`export_pwn_policy` → [pwn_protection.py](../tool/defence/pwn_protection.py) |
+| PWN 沙箱防护 `pwn` | [pwn.tsx](../tool/desktop_ui/src/pages/pwn.tsx) 的 `PwnPage` | `pwn_audit`、`pwn_plan`、`export_pwn_policy` → [pwn_protection.py](../tool/defence/pwn_protection.py) |
+| PWN 流量转发 `pwnForward` | [pwn-forward.tsx](../tool/desktop_ui/src/pages/pwn-forward.tsx) 的 `PwnForwardPage` | `pwn_forward_plan`、`export_pwn_forward` → [pwn_forward.py](../tool/defence/pwn_forward.py) 与 [pwn_waf 源码资源](../tool/defence/pwn_waf_source/) |
 | ELF 加固副本 | [pwn-bundle.tsx](../tool/desktop_ui/src/pages/pwn-bundle.tsx) 的 `PwnBundleTab` | `pwn_bundle_profiles`、`pwn_bundle_preview`、`export_pwn_bundle` → [pwn_bundle.py](../tool/defence/pwn_bundle.py) |
 | 请求审查 `packets` | [packets.tsx](../tool/desktop_ui/src/pages/packets.tsx) 的 `PacketsPage` | 请求查询、手动和自动同步 → `waf_manager.py` 与 [request_logs.py](../tool/defence/request_logs.py) |
 | 源码备份 `backup` | `operations.tsx` 的 `BackupPage` | `backup`、`restore` → `file_processing.py` |
@@ -183,6 +186,14 @@ Host: local.test
 
 兼容预设在 `pwn_bundle.py` 的 `PRESETS`，按组 ID 组合，界面从 `pwn_bundle_profiles` 读取。预设和手动选择共用同一套预览、导出及运行时规则。修改时保留启动及动态加载所需调用，用测试核对每档引用的规则组和具体系统调用。
 
+## PWN 流量转发怎么维护
+
+`pwn_forward.py` 集中校验前端参数并生成 Makefile、xinetd 配置、部署/回滚脚本和 `policy.json`。公开预览不返回内部规范化配置，导出时再使用同一份校验结果。模式保持 `CATCH`、`I0GAN`、`FORWARD`、`FORWARD_MULTI` 四种；多目标列表只接受 `IPv4:端口`，忽略空行、注释和重复项，最多 256 个。
+
+兼容源码在 `defence/pwn_waf_source/`，保留上游 MIT 授权并随 Windows EXE 打包，运行架构限定为 Linux x86/x86-64。CATCH/I0GAN 从 root 管理的 `ORIGINAL_PATH`（界面的原程序备份路径）启动原程序，日志目录仅保存交互日志与轮询状态。部署脚本保存原程序 UID、GID 和权限，回滚时一并恢复；已有日志和备份目录不会被强制修改权限。同一方向的十六进制日志缓存最多 1 MiB，超出后写截断标记，原始字节继续写入日志。
+
+在 Linux x86-64 的 `tool/` 下运行 `python3 -m unittest -v _test_pwn_forward_linux`，验证四模式零警告构建、启动参数、I0GAN 阻断、单目标半关闭、多目标轮询和日志缓存上限。以 root 运行可额外验证重复部署、备份只读和权限回滚；测试仅使用临时目录与回环服务，不修改 xinetd。实际部署仍需在目标 glibc、服务帐号和 xinetd 环境验证。
+
 ## 依赖和构建资源怎么维护
 
 - **Python** · 共享依赖在 [requirements.txt](../tool/requirements.txt)，新版补充依赖在 [desktop-requirements.txt](../tool/desktop-requirements.txt)。ELF 体检使用 pyelftools。更改后用 `start.bat` 选到的解释器验证导入。涉及 pywebview 或 Windows 原生库时，还要检查 EXE 中的依赖和实际窗口加载。
@@ -199,7 +210,7 @@ npm --prefix tool/desktop_ui run build
 
 Push-Location tool
 try {
-    & '.\.venv\Scripts\python.exe' -m unittest -v _test_request_logs _test_packet_autosync _test_desktop_tools _test_scan_removal _test_pwn_protection _test_desktop_attacker
+    & '.\.venv\Scripts\python.exe' -m unittest -v _test_request_logs _test_packet_autosync _test_desktop_tools _test_scan_removal _test_pwn_protection _test_pwn_forward _test_desktop_attacker
 } finally {
     Pop-Location
 }
@@ -213,7 +224,8 @@ try {
 | 请求轮询和 WAF 提示 | [`_test_packet_autosync.py`](../tool/_test_packet_autosync.py) 使用替身 SFTP 验证等待空闲、停止、命中去重、确认游标及连接失败重试。手测自动同步时用隔离站点或替身 SFTP 数据。 |
 | SSH 终端与 Bugku | [`_test_desktop_tools.py`](../tool/_test_desktop_tools.py) 用替身 SSH 和 HTTP 验证终端收发、连接切换、批次去重、停止和错误提示。 |
 | 查杀与文件处置 | [`_test_scan_removal.py`](../tool/_test_scan_removal.py) 用临时文件和替身 SFTP 验证确认、复核、备份、移除及报告状态，用桌面窗口检查阈值说明和处置按钮。 |
-| PWN 防护 | [`_test_pwn_protection.py`](../tool/_test_pwn_protection.py) 验证合成 ELF 解析、路径校验、互斥设置以及导出与预览一致。部署前在目标版本的 systemd 中用 `systemd-analyze verify` 检查完整服务单元，并运行服务回归。 |
+| PWN 沙箱防护 | [`_test_pwn_protection.py`](../tool/_test_pwn_protection.py) 验证合成 ELF 解析、路径校验、互斥设置以及导出与预览一致。部署前在目标版本的 systemd 中用 `systemd-analyze verify` 检查完整服务单元，并运行服务回归。 |
+| PWN 流量转发 | [`_test_pwn_forward.py`](../tool/_test_pwn_forward.py) 验证参数、目标去重和导出；[`_test_pwn_forward_linux.py`](../tool/_test_pwn_forward_linux.py) 在 Linux x86-64 实测四模式、半关闭、轮询、日志上限和部署/回滚。 |
 | 目标探活与攻击辅助 | [`_test_desktop_attacker.py`](../tool/_test_desktop_attacker.py) 用临时目标文件和替身后门检测、执行、上传函数验证读入、后门编号、key 传递、确认门槛、配置落盘及 `attack_urls` 查询。手测时用隔离站点确认写入路径与 Web 访问目录一致。 |
 | PHP 注入或模板 | [`_verify_waf.py`](../tool/_verify_waf.py) 提供本地注入与剥离的往返样例。模板修改用对应 PHP 主版本的 `php -l` 检查。涉及真实写入行为时使用专门的测试站点。 |
 | EXE 或原生窗口 | 见[新版 EXE 构建与验收](#构建新版-windows-exe)。 |
@@ -222,7 +234,7 @@ try {
 
 | 表现 | 排查入口 |
 | --- | --- |
-| 打开的是旧版窗口，或侧栏找不到终端和 Bugku | 使用 `tool/start.bat` 或项目首页链接的当前发布包。根目录下的源码启动命令为 `python tool/launcher.py desktop`。[当前发布包](../releases/MetaAWD-Desktop-20261118-2318.exe) |
+| 打开的是旧版窗口，或侧栏找不到终端和 Bugku | 使用 `tool/start.bat` 或项目首页链接的当前发布包。根目录下的源码启动命令为 `python tool/launcher.py desktop`。[当前发布包](../releases/MetaAWD-Desktop-20261119-162436.exe) |
 | 提示前端未构建，或者修改后还是旧界面 | 重建前端、核对 `dist/index.html` 并重开窗口。用 EXE 时重新打包，EXE 自带构建时的前端。 |
 | Python 依赖缺失 | 看启动日志打印的 Python 路径，用同一个解释器安装 `tool/desktop-requirements.txt`。 |
 | 浏览器显示运行服务未连接 | 浏览器预览用于检查界面。桥接调试从 `tool/start.bat` 启动。自检成功而原生窗口打不开时，检查 Windows WebView2 Runtime 和源码入口的控制台输出。 |
@@ -250,4 +262,4 @@ if ($LASTEXITCODE -ne 0) { throw 'EXE 打包失败' }
 3. 将验收后的 EXE 复制到 `releases/`。如果当前发行包正在运行，使用带日期的文件名保存新版。同步更新项目首页的发布链接，保留可回用的发行文件方便回退。
 4. 交付或修改发布内容时，记录最终产物路径和实际通过的检查。发布前可在干净的源码副本运行 `python scripts/pre_release_audit.py`。
 
-`desktop.spec` 以 `desktop.py` 为入口，收录前端构建、PHP 模板和 pywebview 相关资源，并嵌入由官方 Shield Check SVG 转成的多尺寸 ICO。`tool/build.spec` 与 `tool/build_release.py` 用于旧版 Tkinter EXE。更新导航、按钮名或依赖时同步核对首页快速开始和本手册。修改打包资源路径时核对源码与 EXE 两种方式。[新版打包配置](../tool/desktop.spec) · [当前发布包](../releases/MetaAWD-Desktop-20261118-2318.exe) · [图标来源](../tool/desktop_ui/README.md)
+`desktop.spec` 以 `desktop.py` 为入口，收录前端构建、PHP 模板、PWN 流量转发源码和 pywebview 相关资源，并嵌入由官方 Shield Check SVG 转成的多尺寸 ICO。`tool/build.spec` 与 `tool/build_release.py` 用于旧版 Tkinter EXE。更新导航、按钮名或依赖时同步核对首页快速开始和本手册。修改打包资源路径时核对源码与 EXE 两种方式。[新版打包配置](../tool/desktop.spec) · [当前发布包](../releases/MetaAWD-Desktop-20261119-162436.exe) · [图标来源](../tool/desktop_ui/README.md)

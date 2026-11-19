@@ -123,6 +123,49 @@ export type PwnPolicy = {
 export type ElfBundleProfile = { id: string; label: string; description: string; syscalls: string[] }
 export type ElfBundlePreset = { id: string; label: string; description: string; groups: string[] }
 export type ElfBundle = { source: string; size: number; sha256: string; groups: string[]; syscalls: string[]; files: string[] }
+export type PwnForwardMode = "catch" | "i0gan" | "forward" | "forward_multi"
+export type PwnForwardOptions = {
+  mode: PwnForwardMode
+  architecture: 32 | 64
+  logEnabled: boolean
+  logPath: string
+  logPermissions: "0750" | "0770" | "0777"
+  compiler: "gcc" | "musl-gcc"
+  optimization: "0" | "1" | "2" | "3" | "s"
+  staticLink: boolean
+  stripBinary: boolean
+  extraWarnings: boolean
+  serviceName: string
+  servicePath: string
+  backupPath: string
+  serviceUser: string
+  serviceGroup: string
+  listenAddress: string
+  listenPort: number | null
+  perSource: number | null
+  instances: number | null
+  cpuLimit: number | null
+  memoryLimitMb: number | null
+  forwardHost: string
+  forwardPort: number | null
+  targets: string
+  installXinetd: boolean
+  restartMethod: "none" | "systemctl" | "service"
+}
+export type PwnForwardPlan = {
+  mode: PwnForwardMode
+  modeLabel: string
+  description: string
+  binary: string
+  targetCount: number
+  buildCommand: string
+  deployCommand: string
+  xinetd: string
+  makefile: string
+  summary: { label: string; value: string }[]
+  files: string[]
+  notes: string[]
+}
 export type Snapshot = {
   window?: { controls: boolean; maximized: boolean }
   connection: Connection | null
@@ -176,6 +219,8 @@ type Calls = {
   pwn_bundle_profiles: { args: []; result: { runnerReady: boolean; groups: ElfBundleProfile[]; presets: ElfBundlePreset[] } }
   pwn_bundle_preview: { args: [string, string[]]; result: ElfBundle }
   export_pwn_bundle: { args: [string, string[]]; result: (ElfBundle & { directory: string }) | null }
+  pwn_forward_plan: { args: [PwnForwardOptions]; result: PwnForwardPlan }
+  export_pwn_forward: { args: [PwnForwardOptions]; result: (PwnForwardPlan & { directory: string }) | null }
   list_packets: { args: []; result: Packet[] }
   read_packet: { args: [string]; result: PacketPreview }
   export_packet: { args: [string]; result: string | null }

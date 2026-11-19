@@ -2,8 +2,8 @@ import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { createRoot } from "react-dom/client"
 import {
   Activity, Archive, CircleCheck, Copy, Crosshair, FileSearch, Flag, FolderClock, LayoutDashboard, Minus, Moon,
-  ScrollText, Search, Server, Shield, ShieldAlert, ShieldCheck, ShieldEllipsis, Square, Sun, Terminal, Unplug, X,
-  type LucideIcon,
+  Network, ScrollText, Search, Server, Shield, ShieldAlert, ShieldCheck, ShieldEllipsis, Square, Sun, Terminal, Unplug,
+  X, type LucideIcon,
 } from "lucide-react"
 import { Alert, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -21,6 +21,7 @@ import { BackupPage, WafPage } from "@/pages/operations"
 import { PacketsPage } from "@/pages/packets"
 import { Overview, type Page } from "@/pages/overview"
 import { PwnPage } from "@/pages/pwn"
+import { PwnForwardPage } from "@/pages/pwn-forward"
 import { ScannerPage } from "@/pages/scanner"
 import { TerminalPage } from "@/pages/terminal"
 import { callDesktop, errorText, type WindowCommand } from "@/lib/desktop"
@@ -47,7 +48,8 @@ const groups: { label: string; items: { page: Page; label: string; icon: LucideI
     items: [
       { page: "scan", label: "WebShell 查杀", icon: FileSearch },
       { page: "waf", label: "WAF 管理", icon: Shield },
-      { page: "pwn", label: "PWN 防护", icon: ShieldEllipsis },
+      { page: "pwn", label: "PWN 沙箱防护", icon: ShieldEllipsis },
+      { page: "pwnForward", label: "PWN 流量转发", icon: Network },
       { page: "packets", label: "请求审查", icon: ScrollText },
       { page: "activity", label: "系统日志", icon: Activity },
     ],
@@ -130,6 +132,7 @@ function Workspace() {
     scan: <ScannerPage workspace={workspace} />,
     waf: <WafPage workspace={workspace} />,
     pwn: <PwnPage workspace={workspace} />,
+    pwnForward: <PwnForwardPage workspace={workspace} />,
     packets: <PacketsPage workspace={workspace} openWaf={() => go("waf")}
       hitReview={packetReview?.connection === connectionKey ? packetReview.id : 0} />,
     backup: <BackupPage workspace={workspace} />,

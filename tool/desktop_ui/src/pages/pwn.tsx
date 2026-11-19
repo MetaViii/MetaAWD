@@ -231,7 +231,7 @@ function PolicyTab({ ready }: { ready: boolean }) {
 export function PwnPage({ workspace }: { workspace: Workspace }) {
   return (
     <>
-      <PageHeading title="PWN 防护" description="检查 ELF 加固状态，生成受限运行副本或 systemd 服务策略。" />
+      <PageHeading title="PWN 沙箱防护" description="检查 ELF 加固状态，生成受限运行副本或 systemd 服务策略。" />
       <Tabs defaultValue="audit" className="gap-4">
         <TabsList>
           <TabsTrigger value="audit">ELF 体检</TabsTrigger>

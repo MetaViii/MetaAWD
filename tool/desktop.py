@@ -47,6 +47,7 @@ def create_workspace(webview, service, *, hidden=False):
     from defence.bugku_submit import export_results
     from defence.pwn_bundle import bundle_profiles, export_bundle, preview_bundle
     from defence.pwn_protection import DROP_IN, build_policy, inspect_elf, save_policy
+    from defence.pwn_forward import build_forward_plan, export_forward_bundle
     from defence.request_logs import export_request
 
     webview.settings["ALLOW_FILE_URLS"] = False
@@ -148,6 +149,12 @@ def create_workspace(webview, service, *, hidden=False):
             return None
         return export_bundle(path, groups, destination)
 
+    def export_pwn_forward(options):
+        destination = pick_path("directory")
+        if not destination:
+            return None
+        return export_forward_bundle(options, destination)
+
     methods = {
         "snapshot": snapshot,
         "window_control": window_control,
@@ -164,6 +171,8 @@ def create_workspace(webview, service, *, hidden=False):
         "pwn_bundle_profiles": bundle_profiles,
         "pwn_bundle_preview": preview_bundle,
         "export_pwn_bundle": export_pwn_bundle,
+        "pwn_forward_plan": build_forward_plan,
+        "export_pwn_forward": export_pwn_forward,
         "list_packets": service.list_packets,
         "read_packet": service.read_packet,
         "export_packet": export_packet,

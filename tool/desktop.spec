@@ -19,6 +19,7 @@ datas = [
     (str(tool_dir / "defence" / "phpwaf" / "*.php"), "defence/phpwaf"),
     (str(runner), "build/elf-runner"),
     (str(tool_dir / "defence" / "elf_runner" / "profiles.json"), "defence/elf_runner"),
+    (str(tool_dir / "defence" / "pwn_waf_source"), "defence/pwn_waf_source"),
 ]
 # pywebview's Windows hook collects native libraries. The bridge scripts are data.
 datas += collect_data_files("webview", subdir="js")
